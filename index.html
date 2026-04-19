@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>jamtool</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #ccc;
+            color: #000;
+            overflow: hidden;
+        }
+
+        /* Top Toolbar */
+        .toolbar {
+            background: #eee;
+            border-bottom: 1px solid #999;
+            padding: 2px 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            border-right: 1px solid #ccc;
+            padding-right: 10px;
+        }
+
+        .toolbar-group:last-child {
+            border-right: none;
+        }
+
+        .toolbar-item {
+            padding: 2px 8px;
+            cursor: pointer;
+            font-size: 13px;
+            background: #f8f8f8;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+
+        .toolbar-item:hover {
+            background: #e0e0e0;
+        }
+
+        .toolbar-item:active {
+            background: #d0d0d0;
+        }
+
+        .toolbar-label {
+            font-size: 12px;
+            font-weight: bold;
+            color: #555;
+            text-transform: uppercase;
+        }
+
+        #zoom-level {
+            font-size: 12px;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        /* Layout Main */
+        .main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Left Sidebar - Textures */
+        .sidebar {
+            width: 200px;
+            background: #ddd;
+            border-right: 1px solid #999;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .texture-item {
+            padding: 5px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #ccc;
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .texture-item:hover {
+            background: #eee;
+        }
+
+        .texture-item.selected {
+            background: #007bff;
+            color: white;
+        }
+
+        /* Texture Details */
+        .texture-details {
+            padding: 10px;
+            background: #eee;
+            border-top: 1px solid #999;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .texture-details-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 2px;
+            text-transform: uppercase;
+            font-size: 11px;
+            color: #444;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+        }
+
+        .detail-label {
+            color: #666;
+        }
+
+        .detail-value {
+            font-family: monospace;
+            font-weight: bold;
+        }
+
+        /* Canvas Area */
+        .content-area {
+            flex: 1;
+            background: #888;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+            position: relative;
+        }
+
+        canvas {
+            border: 1px solid #000;
+            background-image: linear-gradient(45deg, #777 25%, transparent 25%),
+            linear-gradient(-45deg, #777 25%, transparent 25%),
+            linear-gradient(45deg, transparent 75%, #777 75%),
+            linear-gradient(-45deg, transparent 75%, #777 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            image-rendering: pixelated;
+            cursor: crosshair;
+        }
+
+        /* Bottom Palette */
+        .bottom-bar {
+            background: #eee;
+            border-top: 1px solid #999;
+            padding: 5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        .current-colors {
+            display: flex;
+            gap: 2px;
+            padding-right: 10px;
+            border-right: 1px solid #999;
+            flex-shrink: 0;
+        }
+
+        .selected-color-preview {
+            width: 32px;
+            height: 32px;
+            border: 1px solid #000;
+            background: #000;
+        }
+
+        .palette-container {
+            display: grid;
+            grid-template-rows: repeat(4, 18px);
+            grid-auto-flow: column;
+            gap: 1px;
+            background: #999;
+            padding: 1px;
+            overflow-x: auto;
+            /* Do not stretch if it fits, but take all space if it's larger */
+            flex: 0 1 auto;
+        }
+
+        .palette-color {
+            width: 18px;
+            height: 18px;
+            border: 1px solid #777;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+
+        .palette-color:hover {
+            border: 1px solid #fff;
+        }
+
+        .palette-color.selected {
+            border: 1px solid #000;
+            box-shadow: inset 0 0 0 1px #fff, 0 0 0 1px #000;
+        }
+
+        .status-bar {
+            background: #eee;
+            border-top: 1px solid #999;
+            padding: 2px 10px;
+            font-size: 12px;
+            color: #333;
+        }
+
+        #jam-file {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<div class="toolbar">
+    <div class="toolbar-group">
+        <span class="toolbar-label">File:</span>
+        <div class="toolbar-item" id="menu-load">Load JAM</div>
+        <div class="toolbar-item" id="menu-save">Save JAM</div>
+    </div>
+    <div class="toolbar-group">
+        <span class="toolbar-label">Zoom:</span>
+        <div class="toolbar-item" id="zoom-out">Zoom Out (-)</div>
+        <div id="zoom-level">100%</div>
+        <div class="toolbar-item" id="zoom-in">Zoom In (+)</div>
+        <div class="toolbar-item" id="zoom-reset">Reset</div>
+    </div>
+</div>
+
+<div class="main-layout">
+    <div class="sidebar">
+        <div id="texture-list" style="flex: 1; overflow-y: auto;">
+            <div style="padding: 10px; font-size: 13px; color: #666;">Load a JAM file</div>
+        </div>
+        <div id="texture-details-container" style="display: none;">
+            <div class="texture-details">
+                <div class="texture-details-title">Texture Details</div>
+                <div id="texture-details-content"></div>
+            </div>
+        </div>
+    </div>
+    <div class="content-area">
+        <canvas height="256" id="editor-canvas" width="256"></canvas>
+    </div>
+</div>
+
+<div class="bottom-bar">
+    <div class="current-colors">
+        <div class="selected-color-preview" id="selected-color-preview"></div>
+    </div>
+    <div class="palette-container" id="palette">
+        <!-- Palette colors -->
+    </div>
+</div>
+
+<div class="status-bar" id="status">
+    Ready.
+</div>
+
+<input accept=".JAM" id="jam-file" type="file">
+
+<script type="module">
+    import init, {decode_jam_wasm, encode_jam_wasm, get_default_palette_wasm} from './pkg/jamtool.js';
+
+    let wasm;
+    let jamParsed = null;
+    let globalPalette = null;
+    let selectedColorIdx = 0;
+    let selectedTextureIdx = 0;
+    let isDrawing = false;
+    let currentScale = 1;
+
+    const canvas = document.getElementById('editor-canvas');
+    const ctx = canvas.getContext('2d');
+    const status = document.getElementById('status');
+    const paletteContainer = document.getElementById('palette');
+    const textureList = document.getElementById('texture-list');
+    const textureDetailsContainer = document.getElementById('texture-details-container');
+    const textureDetailsContent = document.getElementById('texture-details-content');
+    const colorPreview = document.getElementById('selected-color-preview');
+
+    async function start() {
+        wasm = await init();
+        console.log("WASM loaded");
+
+        document.getElementById('menu-load').addEventListener('click', () => document.getElementById('jam-file').click());
+        document.getElementById('menu-save').addEventListener('click', handleSave);
+        document.getElementById('jam-file').addEventListener('change', handleJamUpload);
+
+        document.getElementById('zoom-in').addEventListener('click', () => adjustZoom(1));
+        document.getElementById('zoom-out').addEventListener('click', () => adjustZoom(-1));
+        document.getElementById('zoom-reset').addEventListener('click', () => resetZoom());
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            draw(e);
+        });
+        canvas.addEventListener('mousemove', (e) => {
+            draw(e);
+            updateStatusHover(e);
+        });
+        canvas.addEventListener('mouseleave', () => {
+            status.innerText = jamParsed ? `JAM loaded.` : `Ready.`;
+        });
+        window.addEventListener('mouseup', () => {
+            isDrawing = false;
+        });
+
+        // Load default palette
+        try {
+            globalPalette = get_default_palette_wasm();
+            renderPalette(globalPalette);
+            updateColorPreview();
+            status.innerText = "Ready. Please load a JAM file.";
+        } catch (err) {
+            console.error("Failed to load default palette", err);
+            // Fallback to grayscale if default fails
+            renderPalette(new Uint8Array(256 * 3).map((_, i) => i % 3 === 0 ? Math.floor(i / 3) : 0));
+        }
+    }
+
+    async function handleJamUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const buffer = await file.arrayBuffer();
+        try {
+            jamParsed = decode_jam_wasm(new Uint8Array(buffer));
+            console.log("JAM decoded", jamParsed);
+
+            // Initialize selectedColorIdx to first color of first texture
+            const offset = getPaletteOffset(0, 0);
+            selectedColorIdx = jamParsed.palette_data[offset];
+
+            renderTextureList();
+            selectTexture(0);
+            updateColorPreview();
+            status.innerText = `JAM loaded: ${file.name}`;
+        } catch (err) {
+            alert("Error decoding JAM: " + err);
+        }
+    }
+
+
+    function getPaletteOffset(textureIdx, hazeIdx) {
+        let offset = 0;
+        for (let i = 0; i < textureIdx; i++) {
+            offset += jamParsed.textures[i].quarter_palette_size * 4;
+        }
+        return offset + hazeIdx * jamParsed.textures[textureIdx].quarter_palette_size;
+    }
+
+    function renderPalette(pal) {
+        paletteContainer.innerHTML = '';
+
+        for (let i = 0; i < 256; i++) {
+            const div = document.createElement('div');
+            div.className = 'palette-color';
+
+            if (i === selectedColorIdx) div.classList.add('selected');
+
+            const r = pal[i * 3];
+            const g = pal[i * 3 + 1];
+            const b = pal[i * 3 + 2];
+            div.style.backgroundColor = `rgb(${r},${g},${b})`;
+            div.title = `Index: ${i}`;
+
+            div.onmouseenter = () => {
+                const r = pal[i * 3];
+                const g = pal[i * 3 + 1];
+                const b = pal[i * 3 + 2];
+                status.innerText = `Palette Index: ${i} - Color: rgb(${r},${g},${b})`;
+            };
+            div.onmouseleave = () => {
+                status.innerText = jamParsed ? `JAM loaded.` : `Ready.`;
+            };
+
+            div.onclick = () => {
+                document.querySelector('.palette-color.selected')?.classList.remove('selected');
+                div.classList.add('selected');
+                selectedColorIdx = i;
+                updateColorPreview();
+            };
+            paletteContainer.appendChild(div);
+        }
+    }
+
+    function updateColorPreview() {
+        if (!globalPalette) return;
+        const r = globalPalette[selectedColorIdx * 3];
+        const g = globalPalette[selectedColorIdx * 3 + 1];
+        const b = globalPalette[selectedColorIdx * 3 + 2];
+        colorPreview.style.backgroundColor = `rgb(${r},${g},${b})`;
+        colorPreview.title = `Global Index: ${selectedColorIdx}`;
+    }
+
+    function renderTextureList() {
+        textureList.innerHTML = '';
+        jamParsed.textures.forEach((tex, idx) => {
+            const div = document.createElement('div');
+            div.className = 'texture-item' + (idx === selectedTextureIdx ? ' selected' : '');
+            div.innerText = `Texture ${idx} (ID: ${tex.texture_id})`;
+            div.onclick = () => selectTexture(idx);
+            textureList.appendChild(div);
+        });
+    }
+
+    function selectTexture(idx) {
+        selectedTextureIdx = idx;
+        document.querySelectorAll('.texture-item').forEach((item, i) => {
+            item.classList.toggle('selected', i === idx);
+        });
+        const tex = jamParsed.textures[idx];
+
+        // Update details
+        textureDetailsContainer.style.display = 'block';
+        textureDetailsContent.innerHTML = `
+            <div class="detail-row"><span class="detail-label">Index:</span><span class="detail-value">${idx}</span></div>
+            <div class="detail-row"><span class="detail-label">ID:</span><span class="detail-value">${tex.texture_id}</span></div>
+            <div class="detail-row"><span class="detail-label">Size:</span><span class="detail-value">${tex.width}x${tex.height}</span></div>
+            <div class="detail-row"><span class="detail-label">Position:</span><span class="detail-value">(${tex.left}, ${tex.top})</span></div>
+            <div class="detail-row"><span class="detail-label">Transparent:</span><span class="detail-value">${tex.transparent}</span></div>
+            <div class="detail-row"><span class="detail-label">QPS:</span><span class="detail-value">${tex.quarter_palette_size}</span></div>
+            <div class="detail-row"><span class="detail-label">Ptr:</span><span class="detail-value">${tex.image_ptr}</span></div>
+            <div class="detail-row"><span class="detail-label">Unk02/08:</span><span class="detail-value">${tex.unk02}, ${tex.unk08}</span></div>
+            <div class="detail-row"><span class="detail-label">Unk0a/0e:</span><span class="detail-value">${tex.unk0a}, ${tex.unk0e}</span></div>
+            <div class="detail-row"><span class="detail-label">Unk16/17:</span><span class="detail-value">${tex.unk16}, ${tex.unk17}</span></div>
+            <div class="detail-row"><span class="detail-label">Unk18:</span><span class="detail-value" style="font-size: 10px;">[${tex.unk18.join(',')}]</span></div>
+        `;
+
+        canvas.width = tex.width;
+        canvas.height = tex.height;
+
+        // Initial auto-zoom: scale canvas to fit content-area or stay at at least 2x
+        const container = document.querySelector('.content-area');
+        currentScale = Math.max(2, Math.floor(Math.min(container.clientWidth / tex.width, container.clientHeight / tex.height) * 0.9));
+        updateCanvasScale();
+
+        if (globalPalette) renderPalette(globalPalette);
+        renderEditor();
+    }
+
+    function adjustZoom(delta) {
+        if (delta > 0) {
+            currentScale = currentScale < 1 ? currentScale + 0.25 : currentScale + 1;
+        } else {
+            if (currentScale > 1) {
+                currentScale = Math.max(0.25, currentScale - 1);
+            } else {
+                currentScale = Math.max(0.25, currentScale - 0.25);
+            }
+        }
+        updateCanvasScale();
+    }
+
+    function resetZoom() {
+        if (!jamParsed) return;
+        const tex = jamParsed.textures[selectedTextureIdx];
+        const container = document.querySelector('.content-area');
+        currentScale = Math.max(2, Math.floor(Math.min(container.clientWidth / tex.width, container.clientHeight / tex.height) * 0.9));
+        updateCanvasScale();
+    }
+
+    function updateCanvasScale() {
+        if (!jamParsed) return;
+        const tex = jamParsed.textures[selectedTextureIdx];
+        canvas.style.width = (tex.width * currentScale) + "px";
+        canvas.style.height = (tex.height * currentScale) + "px";
+        document.getElementById('zoom-level').innerText = Math.round(currentScale * 100) + "%";
+    }
+
+    function updateStatusHover(e) {
+        if (!jamParsed || !globalPalette) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
+        const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
+
+        if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
+            const tex = jamParsed.textures[selectedTextureIdx];
+            const canvasX = tex.left + x;
+            const canvasY = tex.top + y;
+            const globalIdx = jamParsed.canvas[canvasY * 256 + canvasX];
+
+            const r = globalPalette[globalIdx * 3];
+            const g = globalPalette[globalIdx * 3 + 1];
+            const b = globalPalette[globalIdx * 3 + 2];
+
+            status.innerText = `Pixel at (${x}, ${y}) - Index: ${globalIdx} - Color: rgb(${r},${g},${b})`;
+        }
+    }
+
+    function renderEditor() {
+        if (!jamParsed || !globalPalette) return;
+        const tex = jamParsed.textures[selectedTextureIdx];
+        const imageData = ctx.createImageData(tex.width, tex.height);
+
+        for (let y = 0; y < tex.height; y++) {
+            for (let x = 0; x < tex.width; x++) {
+                const canvasX = tex.left + x;
+                const canvasY = tex.top + y;
+                const globalIdx = jamParsed.canvas[canvasY * 256 + canvasX];
+
+                const r = globalPalette[globalIdx * 3];
+                const g = globalPalette[globalIdx * 3 + 1];
+                const b = globalPalette[globalIdx * 3 + 2];
+
+                const outIdx = (y * tex.width + x) * 4;
+                imageData.data[outIdx] = r;
+                imageData.data[outIdx + 1] = g;
+                imageData.data[outIdx + 2] = b;
+                imageData.data[outIdx + 3] = 255;
+            }
+        }
+        ctx.putImageData(imageData, 0, 0);
+    }
+
+    function draw(e) {
+        if (!isDrawing || !jamParsed) return;
+        const rect = canvas.getBoundingClientRect();
+        // rect already accounts for CSS scaling, so we just use the mouse position relative to it
+        const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
+        const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
+
+        if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
+            const tex = jamParsed.textures[selectedTextureIdx];
+            const canvasX = tex.left + x;
+            const canvasY = tex.top + y;
+
+            jamParsed.canvas[canvasY * 256 + canvasX] = selectedColorIdx;
+
+            // Update just this pixel on canvas for speed
+            if (globalPalette) {
+                const r = globalPalette[selectedColorIdx * 3];
+                const g = globalPalette[selectedColorIdx * 3 + 1];
+                const b = globalPalette[selectedColorIdx * 3 + 2];
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+    }
+
+    async function handleSave() {
+        if (!jamParsed) return;
+        try {
+            const encoded = encode_jam_wasm(jamParsed);
+            const blob = new Blob([encoded], {type: 'application/octet-stream'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'MODIFIED.JAM';
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert("Error encoding JAM: " + err);
+        }
+    }
+
+    function updateSaveButton() {
+        // Deprecated, using menu now
+    }
+
+    start();
+</script>
+</body>
+</html>
