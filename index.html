@@ -94,6 +94,20 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .texture-thumbnail {
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            border: 0;
+            image-rendering: pixelated;
+            flex-shrink: 0;
+            object-fit: contain;
         }
 
         .texture-item:hover {
@@ -418,10 +432,46 @@
         jamParsed.textures.forEach((tex, idx) => {
             const div = document.createElement('div');
             div.className = 'texture-item' + (idx === selectedTextureIdx ? ' selected' : '');
-            div.innerText = `Texture ${idx} (ID: ${tex.texture_id})`;
+
+            const label = document.createElement('span');
+            label.innerText = `Texture ${idx} (ID: ${tex.texture_id})`;
+            div.appendChild(label);
+
+            const thumbnail = createThumbnail(tex);
+            div.appendChild(thumbnail);
+
             div.onclick = () => selectTexture(idx);
             textureList.appendChild(div);
         });
+    }
+
+    function createThumbnail(tex) {
+        const thumbCanvas = document.createElement('canvas');
+        thumbCanvas.width = tex.width;
+        thumbCanvas.height = tex.height;
+        thumbCanvas.className = 'texture-thumbnail';
+        const tCtx = thumbCanvas.getContext('2d');
+        const imgData = tCtx.createImageData(tex.width, tex.height);
+
+        for (let y = 0; y < tex.height; y++) {
+            for (let x = 0; x < tex.width; x++) {
+                const canvasX = tex.left + x;
+                const canvasY = tex.top + y;
+                const globalIdx = jamParsed.canvas[canvasY * 256 + canvasX];
+
+                const r = globalPalette[globalIdx * 3];
+                const g = globalPalette[globalIdx * 3 + 1];
+                const b = globalPalette[globalIdx * 3 + 2];
+
+                const outIdx = (y * tex.width + x) * 4;
+                imgData.data[outIdx] = r;
+                imgData.data[outIdx + 1] = g;
+                imgData.data[outIdx + 2] = b;
+                imgData.data[outIdx + 3] = 255;
+            }
+        }
+        tCtx.putImageData(imgData, 0, 0);
+        return thumbCanvas;
     }
 
     function selectTexture(idx) {
@@ -555,7 +605,18 @@
                 ctx.fillStyle = `rgb(${r},${g},${b})`;
                 ctx.fillRect(x, y, 1, 1);
             }
+
+            // Update thumbnail
+            updateThumbnail(selectedTextureIdx);
         }
+    }
+
+    function updateThumbnail(idx) {
+        const tex = jamParsed.textures[idx];
+        const item = textureList.children[idx];
+        const oldThumb = item.querySelector('.texture-thumbnail');
+        const newThumb = createThumbnail(tex);
+        item.replaceChild(newThumb, oldThumb);
     }
 
     async function handleSave() {
