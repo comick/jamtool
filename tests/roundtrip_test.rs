@@ -1,10 +1,8 @@
 use jamtool::decode_jam;
 use jamtool::encode_from_meta;
+use jamtool::png;
 use std::fs;
 use std::path::Path;
-
-#[path = "../src/png.rs"]
-mod png;
 
 fn filename_stem(path: &Path) -> String {
     path.file_stem()
@@ -45,13 +43,7 @@ fn run_decode(infile: &Path, outdir: &Path) {
         }
 
         for haze in 0..4usize {
-            let mut rgb_pal = [0u8; 256 * 3];
-            for idx in 0..qps {
-                let gp2_idx = parsed.palette_data[pal_off + haze * qps + idx] as usize;
-                rgb_pal[idx * 3] = global_pal[gp2_idx * 3];
-                rgb_pal[idx * 3 + 1] = global_pal[gp2_idx * 3 + 1];
-                rgb_pal[idx * 3 + 2] = global_pal[gp2_idx * 3 + 2];
-            }
+            let rgb_pal = png::build_palette(&parsed.palette_data, pal_off, haze, qps, &global_pal);
 
             let out = outdir.join(format!(
                 "{}_t{:03}_id{:04}_h{}_{}x{}.png",

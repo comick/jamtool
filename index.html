@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
     <title>jamtool</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -252,11 +253,15 @@
         <div class="toolbar-item" id="menu-save">Save JAM</div>
     </div>
     <div class="toolbar-group">
+        <span class="toolbar-label">Tools:</span>
+        <div class="toolbar-item" id="menu-load-zip">Import</div>
+        <div class="toolbar-item" id="menu-export-zip">Export</div>
+    </div>
+    <div class="toolbar-group">
         <span class="toolbar-label">Zoom:</span>
-        <div class="toolbar-item" id="zoom-out">Zoom Out (-)</div>
+        <input type="range" id="zoom-slider" min="100" max="5000" value="100" step="25" style="width: 150px;">
         <div id="zoom-level">100%</div>
-        <div class="toolbar-item" id="zoom-in">Zoom In (+)</div>
-        <div class="toolbar-item" id="zoom-reset">Reset</div>
+        <div class="toolbar-item" id="zoom-fit">Fit Canvas</div>
     </div>
 </div>
 
@@ -291,17 +296,21 @@
 </div>
 
 <input accept=".JAM" id="jam-file" type="file">
+<input accept=".zip" id="zip-file" type="file">
 
 <script type="module">
-    import init, {decode_jam_wasm, encode_jam_wasm, get_default_palette_wasm} from './pkg/jamtool.js';
+    import init, {
+        decode_jam_wasm,
+        encode_jam_wasm,
+        get_default_palette_wasm,
+        export_to_zip_files_wasm,
+        import_from_zip_files_wasm
+    } from './pkg/jamtool.js';
 
-    let wasm;
     let jamParsed = null;
     let globalPalette = null;
     let selectedColorIdx = 0;
     let selectedTextureIdx = 0;
-    let isDrawing = false;
-    let currentScale = 1;
 
     const canvas = document.getElementById('editor-canvas');
     const ctx = canvas.getContext('2d');
@@ -311,19 +320,24 @@
     const textureDetailsContainer = document.getElementById('texture-details-container');
     const textureDetailsContent = document.getElementById('texture-details-content');
     const colorPreview = document.getElementById('selected-color-preview');
+    const zoomSlider = document.getElementById('zoom-slider');
 
     async function start() {
-        wasm = await init();
+        await init();
         console.log("WASM loaded");
 
         document.getElementById('menu-load').addEventListener('click', () => document.getElementById('jam-file').click());
         document.getElementById('menu-save').addEventListener('click', handleSave);
         document.getElementById('jam-file').addEventListener('change', handleJamUpload);
 
-        document.getElementById('zoom-in').addEventListener('click', () => adjustZoom(1));
-        document.getElementById('zoom-out').addEventListener('click', () => adjustZoom(-1));
-        document.getElementById('zoom-reset').addEventListener('click', () => resetZoom());
+        zoomSlider.addEventListener('input', adjustZoom);
+        document.getElementById('zoom-fit').addEventListener('click', resetZoom);
 
+        document.getElementById('menu-load-zip').addEventListener('click', () => document.getElementById('zip-file').click());
+        document.getElementById('menu-export-zip').addEventListener('click', handleExport);
+        document.getElementById('zip-file').addEventListener('change', handleZipUpload);
+
+        let isDrawing = false;
         canvas.addEventListener('mousedown', (e) => {
             isDrawing = true;
             draw(e);
@@ -359,6 +373,8 @@
         const buffer = await file.arrayBuffer();
         try {
             jamParsed = decode_jam_wasm(new Uint8Array(buffer));
+            // Use filename as stem
+            jamParsed.stem = file.name.replace(/\.jam$/i, '');
             console.log("JAM decoded", jamParsed);
 
             // Initialize selectedColorIdx to first color of first texture
@@ -502,40 +518,33 @@
 
         // Initial auto-zoom: scale canvas to fit content-area or stay at at least 2x
         const container = document.querySelector('.content-area');
-        currentScale = Math.max(2, Math.floor(Math.min(container.clientWidth / tex.width, container.clientHeight / tex.height) * 0.9));
-        updateCanvasScale();
+        let scale = Math.max(2, Math.floor(Math.min(container.clientWidth / tex.width, container.clientHeight / tex.height) * 0.9));
+        updateCanvasScale(scale);
 
         if (globalPalette) renderPalette(globalPalette);
         renderEditor();
     }
 
-    function adjustZoom(delta) {
-        if (delta > 0) {
-            currentScale = currentScale < 1 ? currentScale + 0.25 : currentScale + 1;
-        } else {
-            if (currentScale > 1) {
-                currentScale = Math.max(0.25, currentScale - 1);
-            } else {
-                currentScale = Math.max(0.25, currentScale - 0.25);
-            }
-        }
-        updateCanvasScale();
+    function adjustZoom(e) {
+        updateCanvasScale(e.target.value / 100.0);
     }
 
     function resetZoom() {
         if (!jamParsed) return;
         const tex = jamParsed.textures[selectedTextureIdx];
         const container = document.querySelector('.content-area');
-        currentScale = Math.max(2, Math.floor(Math.min(container.clientWidth / tex.width, container.clientHeight / tex.height) * 0.9));
-        updateCanvasScale();
+        let scale = Math.max(1, Math.floor(Math.min(container.clientWidth / tex.width, container.clientHeight / tex.height) * 0.9));
+        updateCanvasScale(scale);
     }
 
-    function updateCanvasScale() {
+    function updateCanvasScale(scale) {
         if (!jamParsed) return;
+        let actualScale = Math.min(scale, zoomSlider.max / 100.0);
         const tex = jamParsed.textures[selectedTextureIdx];
-        canvas.style.width = (tex.width * currentScale) + "px";
-        canvas.style.height = (tex.height * currentScale) + "px";
-        document.getElementById('zoom-level').innerText = Math.round(currentScale * 100) + "%";
+        canvas.style.width = (tex.width * actualScale) + "px";
+        canvas.style.height = (tex.height * actualScale) + "px";
+        document.getElementById('zoom-level').innerText = Math.round(actualScale * 100) + "%";
+        document.getElementById('zoom-slider').value = Math.round(actualScale * 100);
     }
 
     function updateStatusHover(e) {
@@ -627,7 +636,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'MODIFIED.JAM';
+            a.download = (jamParsed.stem || 'MODIFIED') + '.JAM';
             a.click();
             URL.revokeObjectURL(url);
         } catch (err) {
@@ -635,8 +644,75 @@
         }
     }
 
-    function updateSaveButton() {
-        // Deprecated, using menu now
+    async function handleExport() {
+        if (!jamParsed) return;
+        try {
+            status.innerText = "Generating ZIP...";
+            const stem = jamParsed.stem || 'output';
+            const files = export_to_zip_files_wasm(jamParsed, stem);
+
+            const zip = new JSZip();
+            for (const file of files) {
+                zip.file(file.name, file.data);
+            }
+
+            const blob = await zip.generateAsync({type: "blob"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = stem + '.zip';
+            a.click();
+            URL.revokeObjectURL(url);
+            status.innerText = "ZIP exported.";
+        } catch (err) {
+            alert("Error exporting ZIP: " + err);
+        }
+    }
+
+    async function handleZipUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+            status.innerText = "Reading ZIP...";
+            const zip = await JSZip.loadAsync(file);
+            let metaFile = null;
+            let metaContent = null;
+
+            // Find jammeta.txt
+            for (const name in zip.files) {
+                if (name.endsWith('.jammeta.txt')) {
+                    metaFile = name;
+                    metaContent = await zip.files[name].async("string");
+                    break;
+                }
+            }
+
+            if (!metaContent) {
+                throw new Error("No .jammeta.txt found in ZIP");
+            }
+
+            // Load all PNGs
+            const pngs = {};
+            for (const name in zip.files) {
+                if (name.toLowerCase().endsWith('.png')) {
+                    const data = await zip.files[name].async("uint8array");
+                    pngs[name] = Array.from(data);
+                }
+            }
+
+            status.innerText = "Importing from ZIP...";
+            jamParsed = import_from_zip_files_wasm(metaContent, pngs);
+            console.log("JAM imported from ZIP", jamParsed);
+
+            renderTextureList();
+            selectTexture(0);
+            updateColorPreview();
+            status.innerText = `ZIP loaded: ${file.name}`;
+        } catch (err) {
+            alert("Error loading ZIP: " + err);
+            status.innerText = "Error loading ZIP.";
+        }
     }
 
     start();

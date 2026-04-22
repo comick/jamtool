@@ -1,5 +1,4 @@
 use jamtool::{Result, CANVAS_W};
-mod png;
 use std::fs;
 use std::path::Path;
 
@@ -89,13 +88,8 @@ fn decode(infile: &Path, outdir: &Path) -> Result<()> {
         }
 
         for haze in 0..4usize {
-            let mut rgb_pal = [0u8; 256 * 3];
-            for idx in 0..qps {
-                let gp2_idx = parsed.palette_data[pal_off + haze * qps + idx] as usize;
-                rgb_pal[idx * 3] = global_pal[gp2_idx * 3];
-                rgb_pal[idx * 3 + 1] = global_pal[gp2_idx * 3 + 1];
-                rgb_pal[idx * 3 + 2] = global_pal[gp2_idx * 3 + 2];
-            }
+            let rgb_pal =
+                jamtool::png::build_palette(&parsed.palette_data, pal_off, haze, qps, &global_pal);
 
             let out = outdir.join(format!(
                 "{}_t{:03}_id{:04}_h{}_{}x{}.png",
@@ -106,7 +100,7 @@ fn decode(infile: &Path, outdir: &Path) -> Result<()> {
                 w,
                 h
             ));
-            png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)?;
+            jamtool::png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)?;
             println!("Writing {}", out.display());
             written += 1;
         }
@@ -125,7 +119,7 @@ fn encode(meta_path: &Path, out_jam: &Path) -> Result<()> {
     let mut texture_images = Vec::with_capacity(meta.textures.len());
     for mt in &meta.textures {
         let png_path = meta_dir.join(&mt.png_name);
-        let (img, w, h) = png::read_png_indexed(&png_path)?;
+        let (img, w, h) = jamtool::png::read_png_indexed(&png_path)?;
         if w != mt.tx.width as usize || h != mt.tx.height as usize {
             return Err(format!(
                 "PNG dimensions mismatch for texture {} ({}x{} vs {}x{})",

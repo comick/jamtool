@@ -1,7 +1,7 @@
-use jamtool::Result;
+use crate::Result;
 use png::{BitDepth, ColorType, Decoder, Encoder};
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Cursor};
 use std::path::Path;
 
 pub fn write_png_indexed(
@@ -61,4 +61,68 @@ pub fn read_png_indexed(path: &Path) -> Result<(Vec<u8>, usize, usize)> {
         return Err(format!("PNG {} row size mismatch", path.display()).into());
     }
     Ok((buf, width, height))
+}
+
+pub fn encode_indexed_png_to_bytes(
+    indices: &[u8],
+    w: usize,
+    h: usize,
+    palette_rgb: &[u8; 768],
+    transparent: bool,
+) -> Result<Vec<u8>> {
+    let mut png_data = Vec::new();
+    {
+        let mut encoder = Encoder::new(&mut png_data, w as u32, h as u32);
+        encoder.set_color(ColorType::Indexed);
+        encoder.set_depth(BitDepth::Eight);
+        encoder.set_palette(palette_rgb.to_vec());
+        if transparent {
+            let mut trns = vec![0xffu8; 256];
+            trns[0] = 0;
+            encoder.set_trns(trns);
+        }
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("write png header: {}", e))?;
+        writer
+            .write_image_data(indices)
+            .map_err(|e| format!("write png data: {}", e))?;
+    }
+    Ok(png_data)
+}
+
+pub fn decode_indexed_png_from_bytes(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    let mut reader = Decoder::new(Cursor::new(data))
+        .read_info()
+        .map_err(|e| format!("read png info: {}", e))?;
+
+    let info = reader.info();
+    if info.color_type != ColorType::Indexed {
+        return Err("PNG is not indexed color".into());
+    }
+
+    let mut buf = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
+    let out = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("read png frame: {}", e))?;
+    buf.truncate(out.buffer_size());
+
+    Ok((buf, out.width, out.height))
+}
+
+pub fn build_palette(
+    palette_data: &[u8],
+    pal_off: usize,
+    haze: usize,
+    qps: usize,
+    global_pal: &[u8],
+) -> [u8; 768] {
+    let mut rgb_pal = [0u8; 768];
+    for idx in 0..qps {
+        let gp2_idx = palette_data[pal_off + haze * qps + idx] as usize;
+        rgb_pal[idx * 3] = global_pal[gp2_idx * 3];
+        rgb_pal[idx * 3 + 1] = global_pal[gp2_idx * 3 + 1];
+        rgb_pal[idx * 3 + 2] = global_pal[gp2_idx * 3 + 2];
+    }
+    rgb_pal
 }

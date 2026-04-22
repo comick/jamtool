@@ -9,6 +9,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const JAM_KEY_START: u32 = 0xB082_F165;
 pub const CANVAS_W: usize = 256;
 pub mod palette;
+pub mod png;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
@@ -50,6 +51,7 @@ pub struct JamTexture {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JamParsed {
+    pub stem: String,
     pub num_textures: u16,
     pub canvas_h: u16,
     pub textures: Vec<JamTexture>,
@@ -108,7 +110,7 @@ pub fn decrypt_encrypt_jam(buf: &mut [u8]) {
 /// 3. Palette Data: all local palettes for all textures, concatenated.
 ///    Each texture has 4 local palettes, each of `quarter_palette_size` bytes.
 /// 4. Canvas Data: a 256-wide by `canvas_h` tall grid of pixel indices.
-pub fn parse_jam_decrypted(jam: &[u8]) -> Result<JamParsed> {
+pub fn parse_jam_decrypted(stem: String, jam: &[u8]) -> Result<JamParsed> {
     if jam.len() < 4 {
         return Err("Decoded stream too small for JAM header".into());
     }
@@ -176,6 +178,7 @@ pub fn parse_jam_decrypted(jam: &[u8]) -> Result<JamParsed> {
     let canvas = jam[canvas_start..canvas_start + canvas_size].to_vec();
 
     Ok(JamParsed {
+        stem,
         num_textures,
         canvas_h,
         textures,
@@ -184,11 +187,7 @@ pub fn parse_jam_decrypted(jam: &[u8]) -> Result<JamParsed> {
     })
 }
 
-pub fn write_meta_file(path: &Path, stem: &str, parsed: &JamParsed) -> Result<()> {
-    let mut f = BufWriter::new(
-        File::create(path).map_err(|e| format!("create {}: {}", path.display(), e))?,
-    );
-
+pub fn write_meta<W: Write>(mut f: W, stem: &str, parsed: &JamParsed) -> Result<()> {
     writeln!(f, "JAMMETA 1")?;
     writeln!(f, "stem {}", stem)?;
     writeln!(f, "num_textures {}", parsed.num_textures)?;
@@ -242,6 +241,13 @@ pub fn write_meta_file(path: &Path, stem: &str, parsed: &JamParsed) -> Result<()
     Ok(())
 }
 
+pub fn write_meta_file(path: &Path, stem: &str, parsed: &JamParsed) -> Result<()> {
+    let f = BufWriter::new(
+        File::create(path).map_err(|e| format!("create {}: {}", path.display(), e))?,
+    );
+    write_meta(f, stem, parsed)
+}
+
 /// Decodes a JAM file into internal structure.
 pub fn decode_jam(infile: &Path) -> Result<JamParsed> {
     let mut data = fs::read(infile).map_err(|e| format!("open {}: {}", infile.display(), e))?;
@@ -250,7 +256,13 @@ pub fn decode_jam(infile: &Path) -> Result<JamParsed> {
     }
 
     decrypt_encrypt_jam(&mut data);
-    parse_jam_decrypted(&data)
+    let stem = infile
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "OUT".to_string());
+    let parsed = parse_jam_decrypted(stem, &data)?;
+
+    Ok(parsed)
 }
 
 fn parse_texture_line(line: &str) -> Result<(usize, JamTexture, String)> {
@@ -346,13 +358,12 @@ fn parse_texture_line(line: &str) -> Result<(usize, JamTexture, String)> {
     Ok((tex_index, tx, png_name))
 }
 
-pub fn parse_meta_file(path: &Path) -> Result<JamMeta> {
-    let f = File::open(path).map_err(|e| format!("open meta {}: {}", path.display(), e))?;
-    let mut lines = BufReader::new(f).lines();
+pub fn parse_meta<R: BufRead>(reader: R) -> Result<JamMeta> {
+    let mut lines = reader.lines();
 
     let hdr = lines.next().transpose()?.ok_or_else(|| "empty meta file")?;
     if hdr.trim() != "JAMMETA 1" {
-        return Err(format!("Invalid metadata format header in {}", path.display()).into());
+        return Err("Invalid metadata format header".into());
     }
 
     let stem_line = lines
@@ -466,6 +477,11 @@ pub fn parse_meta_file(path: &Path) -> Result<JamMeta> {
         canvas_h,
         textures,
     })
+}
+
+pub fn parse_meta_file(path: &Path) -> Result<JamMeta> {
+    let f = File::open(path).map_err(|e| format!("open meta {}: {}", path.display(), e))?;
+    parse_meta(BufReader::new(f))
 }
 
 /// Encodes a JAM file from its internal structure.
