@@ -1,7 +1,9 @@
-use jamtool::decode_jam;
-use jamtool::encode_from_meta;
+use jamtool::encode;
 use jamtool::png;
+use jamtool::{decode, parse_meta};
 use std::fs;
+use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
 
 fn filename_stem(path: &Path) -> String {
@@ -11,7 +13,7 @@ fn filename_stem(path: &Path) -> String {
 }
 
 fn run_decode(infile: &Path, outdir: &Path) {
-    let parsed = decode_jam(infile).expect("Failed to decode JAM");
+    let parsed = decode(infile).expect("Failed to decode JAM");
     let stem = filename_stem(infile);
 
     fs::create_dir_all(outdir).expect("Failed to create outdir");
@@ -54,27 +56,25 @@ fn run_decode(infile: &Path, outdir: &Path) {
                 w,
                 h
             ));
-            png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent).expect("Failed to write PNG");
+            png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)
+                .expect("Failed to write PNG");
         }
         pal_off += qps * 4;
     }
 }
 
 fn run_encode(meta_path: &Path, out_jam: &Path) {
-    let mut meta = jamtool::parse_meta_file(meta_path).expect("Failed to parse meta");
+    let f = File::open(meta_path).expect("Failed to open meta file");
+    let meta = parse_meta(BufReader::new(f)).expect("Failed to parse meta file");
     let meta_dir = meta_path.parent().unwrap_or(Path::new("."));
-    let mut texture_images_global = Vec::with_capacity(meta.textures.len());
+    let mut textures = Vec::with_capacity(meta.textures.len());
     for mt in &meta.textures {
         let png_path = meta_dir.join(&mt.png_name);
         let (img, _, _) = png::read_png_indexed(&png_path).expect("Failed to read PNG");
-        texture_images_global.push(img);
+        textures.push(img);
     }
 
-    // Repalettize to handle global-indexed PNGs
-    let texture_images_local = jamtool::repalettize_textures(&mut meta, &texture_images_global)
-        .expect("Failed to repalettize");
-
-    let jam_data = encode_from_meta(&meta, &texture_images_local).expect("Failed to encode JAM");
+    let (_, jam_data) = encode(&meta, &textures).expect("Failed to encode JAM");
     fs::write(out_jam, &jam_data).expect("Failed to write JAM");
 }
 
@@ -100,7 +100,12 @@ fn compare_dirs(dir1: &Path, dir2: &Path, prefix1: &str, prefix2: &str) {
 
         let path2 = dir2.join(&name2);
 
-        assert!(path2.exists(), "File {:?} (mapped from {:?}) missing in second directory", name2, name1);
+        assert!(
+            path2.exists(),
+            "File {:?} (mapped from {:?}) missing in second directory",
+            name2,
+            name1
+        );
 
         if name1.ends_with(".jammeta.txt") || name1.ends_with(".png") {
             // Meta files might have different PNG filenames in them if prefix changed
@@ -166,7 +171,12 @@ fn run_roundtrip_test(jam_name: &str) {
     run_decode(&repacked_jam, &redecoded_dir);
 
     // Verify re-decoded output matches original extraction
-    compare_dirs(golden_dir, &redecoded_dir, jam_name, &format!("{}_repacked", jam_name));
+    compare_dirs(
+        golden_dir,
+        &redecoded_dir,
+        jam_name,
+        &format!("{}_repacked", jam_name),
+    );
 }
 
 #[test]

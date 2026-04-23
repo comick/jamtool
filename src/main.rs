@@ -1,5 +1,7 @@
-use jamtool::{Result, CANVAS_W};
+use jamtool::{parse_meta, Result, CANVAS_W};
 use std::fs;
+use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
 
 fn filename_stem(path: &Path) -> String {
@@ -35,7 +37,7 @@ fn main() -> Result<()> {
 }
 
 fn decode(infile: &Path, outdir: &Path) -> Result<()> {
-    let parsed = jamtool::decode_jam(infile)?;
+    let parsed = jamtool::decode(infile)?;
     println!(
         "JAM header: textures={} canvas={}x{}",
         parsed.num_textures, CANVAS_W, parsed.canvas_h
@@ -50,92 +52,107 @@ fn decode(infile: &Path, outdir: &Path) -> Result<()> {
     jamtool::write_meta_file(&meta_path, &stem, &parsed)?;
     println!("Writing {}", meta_path.display());
 
-    let mut written = 0usize;
-    let mut pal_off = 0usize;
-    for (t, tx) in parsed.textures.iter().enumerate() {
-        let w = tx.width as usize;
-        let h = tx.height as usize;
-        let x = tx.left as usize;
-        let y = tx.top as usize;
-        let qps = tx.quarter_palette_size as usize;
-        let transparent = tx.transparent != 0;
+    // Use try_fold to avoid mutable loops: state is (pal_off, written).
+    let (_pal_off, written) = parsed.textures.iter().enumerate().try_fold(
+        (0usize, 0usize),
+        |(pal_off, written), (t, tx)| -> Result<(usize, usize)> {
+            // if pal_off == usize::MAX we signalled to stop early; noop further entries
+            if pal_off == usize::MAX {
+                return Ok((pal_off, written));
+            }
 
-        if w == 0 || h == 0 || x + w > CANVAS_W || y + h > parsed.canvas_h as usize {
-            eprintln!(
-                "Skipping texture {}: invalid geometry ({},{}, {}x{})",
-                t, x, y, w, h
-            );
-            pal_off += qps * 4;
-            continue;
-        }
-        if qps == 0 || qps > 256 {
-            eprintln!(
-                "Skipping texture {}: invalid palette quarter size {}",
-                t, qps
-            );
-            continue;
-        }
-        if pal_off + qps * 4 > parsed.palette_data.len() {
-            eprintln!("Skipping texture {}: palette data out of range", t);
-            break;
-        }
+            let w = tx.width as usize;
+            let h = tx.height as usize;
+            let x = tx.left as usize;
+            let y = tx.top as usize;
+            let qps = tx.quarter_palette_size as usize;
+            let transparent = tx.transparent != 0;
 
-        let mut img = vec![0u8; w * h];
-        for yy in 0..h {
-            let src = (y + yy) * CANVAS_W + x;
-            let dst = yy * w;
-            img[dst..dst + w].copy_from_slice(&parsed.canvas[src..src + w]);
-        }
+            if w == 0 || h == 0 || x + w > CANVAS_W || y + h > parsed.canvas_h as usize {
+                eprintln!(
+                    "Skipping texture {}: invalid geometry ({},{}, {}x{})",
+                    t, x, y, w, h
+                );
+                return Ok((pal_off + qps * 4, written));
+            }
+            if qps == 0 || qps > 256 {
+                eprintln!(
+                    "Skipping texture {}: invalid palette quarter size {}",
+                    t, qps
+                );
+                return Ok((pal_off, written));
+            }
+            if pal_off + qps * 4 > parsed.palette_data.len() {
+                eprintln!("Skipping texture {}: palette data out of range", t);
+                // signal stopping further processing by setting pal_off to a sentinel
+                return Ok((usize::MAX, written));
+            }
 
-        for haze in 0..4usize {
-            let rgb_pal =
-                jamtool::png::build_palette(&parsed.palette_data, pal_off, haze, qps, &global_pal);
+            // build image without mut loops
+            let img: Vec<u8> = (0..h)
+                .flat_map(|yy| {
+                    let src = (y + yy) * CANVAS_W + x;
+                    parsed.canvas[src..src + w].iter().cloned()
+                })
+                .collect();
 
-            let out = outdir.join(format!(
-                "{}_t{:03}_id{:04}_h{}_{}x{}.png",
-                stem,
-                t,
-                tx.texture_id,
-                haze + 1,
-                w,
-                h
-            ));
-            jamtool::png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)?;
-            println!("Writing {}", out.display());
-            written += 1;
-        }
+            // write the 4 haze variants using iterator-based try_for_each
+            (0..4usize).try_for_each(|haze| -> Result<()> {
+                let rgb_pal = jamtool::png::build_palette(
+                    &parsed.palette_data,
+                    pal_off,
+                    haze,
+                    qps,
+                    &global_pal,
+                );
 
-        pal_off += qps * 4;
-    }
+                let out = outdir.join(format!(
+                    "{}_t{:03}_id{:04}_h{}_{}x{}.png",
+                    stem,
+                    t,
+                    tx.texture_id,
+                    haze + 1,
+                    w,
+                    h
+                ));
+                jamtool::png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)?;
+                println!("Writing {}", out.display());
+                Ok(())
+            })?;
+
+            Ok((pal_off + qps * 4, written + 4))
+        },
+    )?;
 
     println!("Wrote {} PNG files", written);
     Ok(())
 }
 
 fn encode(meta_path: &Path, out_jam: &Path) -> Result<()> {
-    let meta = jamtool::parse_meta_file(meta_path)?;
+    let f = File::open(meta_path).map_err(|e| format!("open meta {}: {}", meta_path.display(), e))?;
+    let meta = parse_meta(BufReader::new(f))?;
     let meta_dir = meta_path.parent().unwrap_or(Path::new("."));
 
-    let mut texture_images = Vec::with_capacity(meta.textures.len());
-    for mt in &meta.textures {
-        let png_path = meta_dir.join(&mt.png_name);
-        let (img, w, h) = jamtool::png::read_png_indexed(&png_path)?;
-        if w != mt.tx.width as usize || h != mt.tx.height as usize {
-            return Err(format!(
-                "PNG dimensions mismatch for texture {} ({}x{} vs {}x{})",
-                mt.png_name, w, h, mt.tx.width, mt.tx.height
-            )
-            .into());
-        }
-        texture_images.push(img);
-    }
+    // load png into encodable texture
+    let textures = meta
+        .textures
+        .iter()
+        .map(|mt| {
+            let png_path = meta_dir.join(&mt.png_name);
+            let (img, w, h) = jamtool::png::read_png_indexed(&png_path)?;
 
-    // New: Always repalettize when encoding from PNGs,
-    // to support PNGs that were edited using a global palette.
-    let mut meta = meta;
-    let texture_images = jamtool::repalettize_textures(&mut meta, &texture_images)?;
+            if w != mt.tx.width as usize || h != mt.tx.height as usize {
+                return Err(format!(
+                    "PNG dimensions mismatch for texture {} ({}x{} vs {}x{})",
+                    mt.png_name, w, h, mt.tx.width, mt.tx.height
+                )
+                .into());
+            }
+            Ok(img)
+        })
+        .collect::<Result<Vec<Vec<u8>>>>()?;
 
-    let jam_data = jamtool::encode_from_meta(&meta, &texture_images)?;
+    let (meta, jam_data) = jamtool::encode(&meta, &textures)?;
     fs::write(out_jam, &jam_data).map_err(|e| format!("write {}: {}", out_jam.display(), e))?;
 
     println!(
@@ -146,5 +163,6 @@ fn encode(meta_path: &Path, out_jam: &Path) -> Result<()> {
         meta.num_textures,
         meta.canvas_h
     );
+
     Ok(())
 }

@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -241,6 +241,7 @@ pub fn write_meta<W: Write>(mut f: W, stem: &str, parsed: &JamParsed) -> Result<
     Ok(())
 }
 
+// TODO drop
 pub fn write_meta_file(path: &Path, stem: &str, parsed: &JamParsed) -> Result<()> {
     let f = BufWriter::new(
         File::create(path).map_err(|e| format!("create {}: {}", path.display(), e))?,
@@ -249,14 +250,14 @@ pub fn write_meta_file(path: &Path, stem: &str, parsed: &JamParsed) -> Result<()
 }
 
 /// Decodes a JAM file into internal structure.
-pub fn decode_jam(infile: &Path) -> Result<JamParsed> {
-    let mut data = fs::read(infile).map_err(|e| format!("open {}: {}", infile.display(), e))?;
+pub fn decode(jam_path: &Path) -> Result<JamParsed> {
+    let mut data = fs::read(jam_path).map_err(|e| format!("open {}: {}", jam_path.display(), e))?;
     if data.is_empty() {
         return Err("File too small".into());
     }
 
     decrypt_encrypt_jam(&mut data);
-    let stem = infile
+    let stem = jam_path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "OUT".to_string());
@@ -265,7 +266,7 @@ pub fn decode_jam(infile: &Path) -> Result<JamParsed> {
     Ok(parsed)
 }
 
-fn parse_texture_line(line: &str) -> Result<(usize, JamTexture, String)> {
+fn parse_meta_texture(line: &str) -> Result<(usize, JamTexture, String)> {
     let parts = line.split_whitespace().collect::<Vec<_>>();
     if parts.len() < 32 || parts[0] != "texture" {
         return Err("Invalid texture line in metadata".into());
@@ -410,7 +411,7 @@ pub fn parse_meta<R: BufRead>(reader: R) -> Result<JamMeta> {
             .next()
             .transpose()?
             .ok_or_else(|| "Invalid texture line in metadata")?;
-        let (tex_index, mut tx, png_name) = parse_texture_line(&tline)?;
+        let (tex_index, mut tx, png_name) = parse_meta_texture(&tline)?;
         if tex_index != t {
             return Err(format!("Invalid texture values in metadata at texture {}", t).into());
         }
@@ -479,16 +480,14 @@ pub fn parse_meta<R: BufRead>(reader: R) -> Result<JamMeta> {
     })
 }
 
-pub fn parse_meta_file(path: &Path) -> Result<JamMeta> {
-    let f = File::open(path).map_err(|e| format!("open meta {}: {}", path.display(), e))?;
-    parse_meta(BufReader::new(f))
-}
-
 /// Encodes a JAM file from its internal structure.
 ///
 /// It rebuilds the JAM canvas and palettes from the provided metadata and image data.
 /// The resulting JAM is encrypted.
-pub fn encode_from_meta(meta: &JamMeta, texture_images: &[Vec<u8>]) -> Result<Vec<u8>> {
+pub fn encode(meta: &JamMeta, textures: &[Vec<u8>]) -> Result<(JamMeta, Vec<u8>)> {
+    // Always repalettize to support images that were edited using a global palette.
+    let (meta, textures) = repalettize_textures(&meta, &textures)?;
+
     let mut palette_data = Vec::new();
     for mt in &meta.textures {
         let qps = mt.tx.quarter_palette_size as usize;
@@ -502,7 +501,7 @@ pub fn encode_from_meta(meta: &JamMeta, texture_images: &[Vec<u8>]) -> Result<Ve
 
     let mut canvas = vec![0u8; CANVAS_W * meta.canvas_h as usize];
     for (t, mt) in meta.textures.iter().enumerate() {
-        let img = &texture_images[t];
+        let img = &textures[t];
         let w = mt.tx.width as usize;
         let h = mt.tx.height as usize;
         if img.len() != w * h {
@@ -562,22 +561,23 @@ pub fn encode_from_meta(meta: &JamMeta, texture_images: &[Vec<u8>]) -> Result<Ve
     jam[canvas_start..canvas_start + canvas.len()].copy_from_slice(&canvas);
 
     decrypt_encrypt_jam(&mut jam);
-    Ok(jam)
+    Ok((meta, jam))
 }
 
 /// Helper to map global-indexed image data to local-indexed data and rebuild local palettes.
-/// This is useful when you have images edited with a global palette and want to encode them into a JAM.
-pub fn repalettize_textures(
-    meta: &mut JamMeta,
+/// This is useful when you have images edited externally with a global palette and want to
+/// encode them into a JAM.
+fn repalettize_textures(
+    meta_in: &JamMeta,
     texture_images_global: &[Vec<u8>],
-) -> Result<Vec<Vec<u8>>> {
-    if meta.textures.len() != texture_images_global.len() {
+) -> Result<(JamMeta, Vec<Vec<u8>>)> {
+    if meta_in.textures.len() != texture_images_global.len() {
         return Err("Number of textures and images mismatch".into());
     }
 
     let mut new_texture_images = Vec::with_capacity(texture_images_global.len());
-
-    for (t, mt) in meta.textures.iter_mut().enumerate() {
+    let mut meta_out: JamMeta = meta_in.clone();
+    for (t, mt) in meta_out.textures.iter_mut().enumerate() {
         let img_global = &texture_images_global[t];
         let mut unique_colors = Vec::new();
         for &global_idx in img_global {
@@ -616,5 +616,5 @@ pub fn repalettize_textures(
         }
     }
 
-    Ok(new_texture_images)
+    Ok((meta_out, new_texture_images))
 }

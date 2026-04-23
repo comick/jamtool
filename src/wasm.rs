@@ -1,5 +1,5 @@
 use crate::{
-    decrypt_encrypt_jam, encode_from_meta, parse_jam_decrypted, JamMeta, JamParsed, MetaTexture,
+    decrypt_encrypt_jam, encode, parse_jam_decrypted, JamMeta, JamParsed, MetaTexture,
 };
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen;
@@ -29,7 +29,7 @@ pub fn decode_jam_wasm(jam_data: &[u8]) -> Result<JsValue, JsValue> {
     let data = jam_data.to_vec();
     let mut data_mut = data;
     decrypt_encrypt_jam(&mut data_mut);
-    let parsed = parse_jam_decrypted(&data_mut).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let parsed = parse_jam_decrypted("boh".to_string(), &data_mut).map_err(|e| JsValue::from_str(&e.to_string()))?;
     // 1. Convert local indices to global indices in the canvas
     let mut global_canvas = parsed.canvas.clone();
     for tex in &parsed.textures {
@@ -106,11 +106,11 @@ pub fn encode_jam_wasm(parsed_js: JsValue) -> Result<Vec<u8>, JsValue> {
     };
 
     // Use the core library's repalettize_textures
-    let texture_images = crate::repalettize_textures(&mut meta, &texture_images_global)
+    let (meta, texture_images) = crate::repalettize_textures(&mut meta, &texture_images_global)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    let encoded =
-        encode_from_meta(&meta, &texture_images).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let (_, encoded) =
+        encode(&meta, &texture_images).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(encoded)
 }
 
@@ -189,7 +189,7 @@ pub fn export_to_zip_files_wasm(parsed_js: JsValue, stem: &str) -> Result<JsValu
 
 #[wasm_bindgen]
 pub fn import_from_zip_files_wasm(meta_str: &str, pngs_js: JsValue) -> Result<JsValue, JsValue> {
-    let mut meta =
+    let meta =
         crate::parse_meta(meta_str.as_bytes()).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // pngs_js should be a Map or an Object: filename -> Uint8Array
@@ -224,11 +224,9 @@ pub fn import_from_zip_files_wasm(meta_str: &str, pngs_js: JsValue) -> Result<Js
     }
 
     // Repalettize
-    let texture_images_local = crate::repalettize_textures(&mut meta, &texture_images_global)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Encode to JAM data (but we actually want JamParsed to update the editor)
-    let encoded_jam = crate::encode_from_meta(&meta, &texture_images_local)
+    let (meta, encoded_jam) = crate::encode(&meta, &texture_images_global)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Now decode it back to get JamParsed with the global canvas we expect in the editor
@@ -236,7 +234,7 @@ pub fn import_from_zip_files_wasm(meta_str: &str, pngs_js: JsValue) -> Result<Js
     // Decoding it back is safer to ensure consistency with what the editor expects.
     let mut data = encoded_jam;
     decrypt_encrypt_jam(&mut data);
-    let mut parsed = parse_jam_decrypted(&data).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mut parsed = parse_jam_decrypted(meta.stem, &data).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Convert back to global canvas (like in decode_jam_wasm)
     let mut global_canvas = parsed.canvas.clone();
