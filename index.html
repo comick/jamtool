@@ -238,6 +238,19 @@
             padding: 2px 10px;
             font-size: 12px;
             color: #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-bar a {
+            color: #555;
+            text-decoration: none;
+        }
+
+        .status-bar a:hover {
+            color: #007bff;
+            text-decoration: underline;
         }
 
         #jam-file {
@@ -291,8 +304,9 @@
     </div>
 </div>
 
-<div class="status-bar" id="status">
-    Ready.
+<div class="status-bar">
+    <span id="status-text">Ready.</span>
+    <span>Source code at <a href="https://github.com/comick/jamtool" target="_blank">GitHub.com/comick/jamtool</a></span>
 </div>
 
 <input accept=".JAM" id="jam-file" type="file">
@@ -316,7 +330,7 @@
 
     const canvas = document.getElementById('editor-canvas');
     const ctx = canvas.getContext('2d');
-    const status = document.getElementById('status');
+    const status = document.getElementById('status-text');
     const paletteContainer = document.getElementById('palette');
     const textureList = document.getElementById('texture-list');
     const textureDetailsContainer = document.getElementById('texture-details-container');
