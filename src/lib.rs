@@ -187,6 +187,57 @@ pub fn parse_jam_decrypted(stem: String, jam: &[u8]) -> Result<JamParsed> {
     })
 }
 
+/// Extract the pixel data for a specific texture from the canvas,
+/// using whatever indices (local or global) are currently stored.
+pub fn extract_texture_image(parsed: &JamParsed, tex_idx: usize) -> Vec<u8> {
+    let tx = &parsed.textures[tex_idx];
+    let w = tx.width as usize;
+    let h = tx.height as usize;
+    let x = tx.left as usize;
+    let y = tx.top as usize;
+
+    (0..h)
+        .flat_map(|yy| {
+            let src = (y + yy) * CANVAS_W + x;
+            parsed.canvas[src..src + w].iter().cloned()
+        })
+        .collect()
+}
+
+/// Return the byte offset into `palette_data` for a given texture index.
+///
+/// Palettes are stored sequentially: for each texture, `quarter_palette_size * 4` bytes.
+pub fn texture_palette_offset(parsed: &JamParsed, tex_idx: usize) -> usize {
+    parsed.textures[..tex_idx]
+        .iter()
+        .map(|tx| tx.quarter_palette_size as usize * 4)
+        .sum()
+}
+
+/// Convert all texture regions in the canvas from local palette indices
+/// (pointing into each texture's own sub-palette) to global GP2 palette indices.
+pub fn canvas_to_global_indices(parsed: &JamParsed) -> Vec<u8> {
+    let mut global = parsed.canvas.clone();
+    for (i, tex) in parsed.textures.iter().enumerate() {
+        let qps = tex.quarter_palette_size as usize;
+        if qps == 0 {
+            continue;
+        }
+        let off = texture_palette_offset(parsed, i);
+        let map = &parsed.palette_data[off..off + qps];
+        for y in 0..tex.height as usize {
+            for x in 0..tex.width as usize {
+                let dst = (tex.top as usize + y) * CANVAS_W + (tex.left as usize + x);
+                let local = global[dst] as usize;
+                if local < qps {
+                    global[dst] = map[local];
+                }
+            }
+        }
+    }
+    global
+}
+
 pub fn write_meta<W: Write>(mut f: W, stem: &str, parsed: &JamParsed) -> Result<()> {
     writeln!(f, "JAMMETA 1")?;
     writeln!(f, "stem {}", stem)?;

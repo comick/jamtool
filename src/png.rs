@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{JamParsed, Result, extract_texture_image, texture_palette_offset};
 use png::{BitDepth, ColorType, Decoder, Encoder};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Cursor};
@@ -108,6 +108,38 @@ pub fn decode_indexed_png_from_bytes(data: &[u8]) -> Result<(Vec<u8>, u32, u32)>
     buf.truncate(out.buffer_size());
 
     Ok((buf, out.width, out.height))
+}
+
+/// Encode a single texture+haze combination as an indexed PNG, returning
+/// the suggested filename and the raw PNG bytes.
+pub fn export_texture_png(
+    parsed: &JamParsed,
+    tex_idx: usize,
+    haze: usize,
+    global_pal: &[u8],
+) -> Result<(String, Vec<u8>)> {
+    let tx = &parsed.textures[tex_idx];
+    let w = tx.width as usize;
+    let h = tx.height as usize;
+    let qps = tx.quarter_palette_size as usize;
+    let transparent = tx.transparent != 0;
+    let pal_off = texture_palette_offset(parsed, tex_idx);
+
+    let img = extract_texture_image(parsed, tex_idx);
+    let rgb_pal = build_palette(&parsed.palette_data, pal_off, haze, qps, global_pal);
+    let png_data = encode_indexed_png_to_bytes(&img, w, h, &rgb_pal, transparent)?;
+
+    let filename = format!(
+        "{}_t{:03}_id{:04}_h{}_{}x{}.png",
+        parsed.stem,
+        tex_idx,
+        tx.texture_id,
+        haze + 1,
+        w,
+        h
+    );
+
+    Ok((filename, png_data))
 }
 
 pub fn build_palette(

@@ -312,6 +312,8 @@
     let selectedColorIdx = 0;
     let selectedTextureIdx = 0;
 
+    let isDrawing = false;
+
     const canvas = document.getElementById('editor-canvas');
     const ctx = canvas.getContext('2d');
     const status = document.getElementById('status');
@@ -337,7 +339,6 @@
         document.getElementById('menu-export-zip').addEventListener('click', handleExport);
         document.getElementById('zip-file').addEventListener('change', handleZipUpload);
 
-        let isDrawing = false;
         canvas.addEventListener('mousedown', (e) => {
             isDrawing = true;
             draw(e);
