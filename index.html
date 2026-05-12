@@ -383,6 +383,8 @@
             isDrawing = false;
         });
 
+        document.addEventListener('paste', handlePaste);
+
         // Load default palette
         try {
             globalPalette = get_default_palette_wasm();
@@ -753,6 +755,77 @@
             alert("Error loading ZIP: " + err);
             status.innerText = "Error loading ZIP.";
         }
+    }
+
+    async function handlePaste(e) {
+        if (!jamParsed || !globalPalette) return;
+
+        const items = e.clipboardData.items;
+        let imageFile = null;
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                imageFile = item.getAsFile();
+                break;
+            }
+        }
+        if (!imageFile) return;
+        e.preventDefault();
+
+        const tex = jamParsed.textures[selectedTextureIdx];
+        const texW = tex.width;
+        const texH = tex.height;
+
+        status.innerText = `Quantizing pasted image to ${texW}x${texH}...`;
+
+        // Decode and scale the image to the texture size
+        const img = await createImageBitmap(imageFile);
+        const offscreen = document.createElement('canvas');
+        offscreen.width = texW;
+        offscreen.height = texH;
+        const offCtx = offscreen.getContext('2d');
+        offCtx.drawImage(img, 0, 0, texW, texH);
+        const imageData = offCtx.getImageData(0, 0, texW, texH);
+        const pixels = imageData.data;
+
+        // Precompute squared distances from each GP2 palette entry
+        // to speed up nearest-color search
+        const pal = globalPalette;
+
+        for (let y = 0; y < texH; y++) {
+            for (let x = 0; x < texW; x++) {
+                const pi = (y * texW + x) * 4;
+                const r = pixels[pi];
+                const g = pixels[pi + 1];
+                const b = pixels[pi + 2];
+                const a = pixels[pi + 3];
+
+                // Treat nearly transparent pixels as index 0
+                if (a < 128) {
+                    jamParsed.canvas[(tex.top + y) * 256 + tex.left + x] = 0;
+                    continue;
+                }
+
+                // Find nearest color in GP2 palette (Euclidean distance)
+                let bestIdx = 0;
+                let bestDist = Infinity;
+                for (let i = 0; i < 256; i++) {
+                    const dr = r - pal[i * 3];
+                    const dg = g - pal[i * 3 + 1];
+                    const db = b - pal[i * 3 + 2];
+                    const dist = dr * dr + dg * dg + db * db;
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestIdx = i;
+                    }
+                }
+
+                jamParsed.canvas[(tex.top + y) * 256 + tex.left + x] = bestIdx;
+            }
+        }
+
+        renderEditor();
+        updateThumbnail(selectedTextureIdx);
+        status.innerText = `Pasted image quantized to ${texW}x${texH} texture`;
     }
 
     start();
