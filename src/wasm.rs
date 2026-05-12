@@ -41,11 +41,11 @@ pub fn encode_jam_wasm(parsed_js: JsValue) -> Result<Vec<u8>, JsValue> {
     // parsed.canvas now contains GLOBAL indices.
     // We need to extract per-texture global images and then repalettize them.
 
-    let mut texture_images_global: Vec<Vec<u8>> = (0..parsed.textures.len())
+    let texture_images_global: Vec<Vec<u8>> = (0..parsed.textures.len())
         .map(|t| crate::extract_texture_image(&parsed, t))
         .collect();
 
-    let mut meta_textures: Vec<MetaTexture> = parsed
+    let meta_textures: Vec<MetaTexture> = parsed
         .textures
         .clone()
         .into_iter()
@@ -134,7 +134,7 @@ pub fn import_from_zip_files_wasm(meta_str: &str, pngs_js: JsValue) -> Result<Js
     let pngs: serde_json::Value =
         serde_wasm_bindgen::from_value(pngs_js).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    let mut texture_images_global: Vec<Vec<u8>> = meta
+    let texture_images_global: Vec<Vec<u8>> = meta
         .textures
         .iter()
         .map(|mt| -> Result<Vec<u8>, JsValue> {

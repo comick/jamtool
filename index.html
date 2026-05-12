@@ -350,6 +350,15 @@
         canvas.addEventListener('mouseleave', () => {
             status.innerText = jamParsed ? `JAM loaded.` : `Ready.`;
         });
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (!jamParsed) return;
+            const current = parseFloat(zoomSlider.value);
+            const step = current / 100.0 * 25;
+            const delta = e.deltaY > 0 ? -step : step;
+            const next = Math.max(parseFloat(zoomSlider.min), Math.min(parseFloat(zoomSlider.max), current + delta));
+            updateCanvasScale(next / 100.0);
+        }, { passive: false });
         window.addEventListener('mouseup', () => {
             isDrawing = false;
         });
