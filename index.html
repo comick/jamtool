@@ -57,6 +57,11 @@
             background: #d0d0d0;
         }
 
+        .toolbar-item.disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
         .toolbar-label {
             font-size: 12px;
             font-weight: bold;
@@ -253,7 +258,8 @@
             text-decoration: underline;
         }
 
-        #jam-file {
+        #jam-file,
+        #zip-file {
             display: none;
         }
     </style>
@@ -263,18 +269,18 @@
     <div class="toolbar-group">
         <span class="toolbar-label">File:</span>
         <div class="toolbar-item" id="menu-load">Load JAM</div>
-        <div class="toolbar-item" id="menu-save">Save JAM</div>
+        <div class="toolbar-item disabled" id="menu-save">Save JAM</div>
     </div>
     <div class="toolbar-group">
         <span class="toolbar-label">Tools:</span>
         <div class="toolbar-item" id="menu-load-zip">Import</div>
-        <div class="toolbar-item" id="menu-export-zip">Export</div>
+        <div class="toolbar-item disabled" id="menu-export-zip">Export</div>
     </div>
     <div class="toolbar-group">
         <span class="toolbar-label">Zoom:</span>
-        <input type="range" id="zoom-slider" min="100" max="5000" value="100" step="25" style="width: 150px;">
+        <input type="range" id="zoom-slider" min="100" max="5000" value="100" step="25" style="width: 150px;" disabled>
         <div id="zoom-level">100%</div>
-        <div class="toolbar-item" id="zoom-fit">Fit Canvas</div>
+        <div class="toolbar-item disabled" id="zoom-fit">Fit Canvas</div>
     </div>
 </div>
 
@@ -408,12 +414,21 @@
             renderTextureList();
             selectTexture(0);
             updateColorPreview();
+            updateToolbarState();
             status.innerText = `JAM loaded: ${file.name}`;
         } catch (err) {
             alert("Error decoding JAM: " + err);
         }
     }
 
+
+    function updateToolbarState() {
+        const enabled = jamParsed != null;
+        document.getElementById('menu-save').classList.toggle('disabled', !enabled);
+        document.getElementById('menu-export-zip').classList.toggle('disabled', !enabled);
+        document.getElementById('zoom-fit').classList.toggle('disabled', !enabled);
+        document.getElementById('zoom-slider').disabled = !enabled;
+    }
 
     function getPaletteOffset(textureIdx, hazeIdx) {
         let offset = 0;
@@ -732,6 +747,7 @@
             renderTextureList();
             selectTexture(0);
             updateColorPreview();
+            updateToolbarState();
             status.innerText = `ZIP loaded: ${file.name}`;
         } catch (err) {
             alert("Error loading ZIP: " + err);
