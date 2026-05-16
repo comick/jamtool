@@ -74,6 +74,56 @@ pub fn get_default_palette_wasm() -> Result<Vec<u8>, JsValue> {
     Ok(crate::palette::GP2_PALETTE.to_vec())
 }
 
+/// Quantize RGBA pixel data to nearest GP2 palette indices.
+///
+/// `rgba` must be a flat Uint8Array with 4 bytes per pixel (R, G, B, A).
+/// Pixels with alpha < `alpha_threshold` are assigned index 0.
+/// Returns one byte (GP2 index 0-255) per pixel.
+#[wasm_bindgen]
+pub fn quantize_rgba_to_gp2_indices_wasm(
+    rgba: &[u8],
+    alpha_threshold: u8,
+) -> Result<Vec<u8>, JsValue> {
+    if rgba.len() % 4 != 0 {
+        return Err(JsValue::from_str(
+            "RGBA data length must be a multiple of 4",
+        ));
+    }
+
+    let num_pixels = rgba.len() / 4;
+    let pal = crate::palette::GP2_PALETTE;
+    let mut indices = Vec::with_capacity(num_pixels);
+
+    for i in 0..num_pixels {
+        let off = i * 4;
+        let r = rgba[off] as i32;
+        let g = rgba[off + 1] as i32;
+        let b = rgba[off + 2] as i32;
+        let a = rgba[off + 3];
+
+        if a < alpha_threshold {
+            indices.push(0);
+            continue;
+        }
+
+        let mut best_idx = 0u8;
+        let mut best_dist = i32::MAX;
+        for j in 0..256u16 {
+            let dr = r - pal[j as usize * 3] as i32;
+            let dg = g - pal[j as usize * 3 + 1] as i32;
+            let db = b - pal[j as usize * 3 + 2] as i32;
+            let dist = dr * dr + dg * dg + db * db;
+            if dist < best_dist {
+                best_dist = dist;
+                best_idx = j as u8;
+            }
+        }
+        indices.push(best_idx);
+    }
+
+    Ok(indices)
+}
+
 #[wasm_bindgen]
 pub fn export_to_zip_files_wasm(parsed_js: JsValue, stem: &str) -> Result<JsValue, JsValue> {
     let parsed: JamParsed =

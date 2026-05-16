@@ -364,7 +364,8 @@
         encode_jam_wasm,
         get_default_palette_wasm,
         export_to_zip_files_wasm,
-        import_from_zip_files_wasm
+        import_from_zip_files_wasm,
+        quantize_rgba_to_gp2_indices_wasm
     } from './pkg/jamtool.js';
 
     let jamParsed = null;
@@ -518,6 +519,8 @@
                 pasteState.isDragging = false;
                 pasteState.resizing = null;
             }
+            // Refresh thumbnail after a drawing stroke ends
+            if (jamParsed) updateThumbnail(selectedTextureIdx);
         });
 
         document.addEventListener('paste', handlePaste);
@@ -613,14 +616,12 @@
             const r = pal[i * 3];
             const g = pal[i * 3 + 1];
             const b = pal[i * 3 + 2];
-            div.style.backgroundColor = `rgb(${r},${g},${b})`;
+            const rgb = `rgb(${r},${g},${b})`;
+            div.style.backgroundColor = rgb;
             div.title = `Index: ${i}`;
 
             div.onmouseenter = () => {
-                const r = pal[i * 3];
-                const g = pal[i * 3 + 1];
-                const b = pal[i * 3 + 2];
-                status.innerText = `Palette Index: ${i} - Color: rgb(${r},${g},${b})`;
+                status.innerText = `Palette Index: ${i} - Color: ${rgb}`;
             };
             div.onmouseleave = () => {
                 status.innerText = jamParsed ? `JAM loaded.` : `Ready.`;
@@ -663,32 +664,32 @@
         });
     }
 
+    /// Build an ImageData for a texture by reading global GP2 indices from the
+    /// canvas and converting them to RGB via the global palette.
+    function textureToImageData(tex) {
+        const w = tex.width;
+        const h = tex.height;
+        const imgData = new ImageData(w, h);
+        const data = imgData.data;
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const globalIdx = jamParsed.canvas[(tex.top + y) * 256 + tex.left + x];
+                const out = (y * w + x) * 4;
+                data[out]     = globalPalette[globalIdx * 3];
+                data[out + 1] = globalPalette[globalIdx * 3 + 1];
+                data[out + 2] = globalPalette[globalIdx * 3 + 2];
+                data[out + 3] = 255;
+            }
+        }
+        return imgData;
+    }
+
     function createThumbnail(tex) {
         const thumbCanvas = document.createElement('canvas');
         thumbCanvas.width = tex.width;
         thumbCanvas.height = tex.height;
         thumbCanvas.className = 'texture-thumbnail';
-        const tCtx = thumbCanvas.getContext('2d');
-        const imgData = tCtx.createImageData(tex.width, tex.height);
-
-        for (let y = 0; y < tex.height; y++) {
-            for (let x = 0; x < tex.width; x++) {
-                const canvasX = tex.left + x;
-                const canvasY = tex.top + y;
-                const globalIdx = jamParsed.canvas[canvasY * 256 + canvasX];
-
-                const r = globalPalette[globalIdx * 3];
-                const g = globalPalette[globalIdx * 3 + 1];
-                const b = globalPalette[globalIdx * 3 + 2];
-
-                const outIdx = (y * tex.width + x) * 4;
-                imgData.data[outIdx] = r;
-                imgData.data[outIdx + 1] = g;
-                imgData.data[outIdx + 2] = b;
-                imgData.data[outIdx + 3] = 255;
-            }
-        }
-        tCtx.putImageData(imgData, 0, 0);
+        thumbCanvas.getContext('2d').putImageData(textureToImageData(tex), 0, 0);
         return thumbCanvas;
     }
 
@@ -753,53 +754,36 @@
         updatePasteOverlayDOM();
     }
 
-    function updateStatusHover(e) {
-        if (!jamParsed || !globalPalette) return;
+    /// Convert a mouse event to texture-space coordinates.
+    /// Returns {x, y, canvasX, canvasY} or null if outside the canvas.
+    function mouseToTextureCoords(e) {
         const rect = canvas.getBoundingClientRect();
         const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
         const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
 
-        if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
-            const tex = jamParsed.textures[selectedTextureIdx];
-            const canvasX = tex.left + x;
-            const canvasY = tex.top + y;
-            const globalIdx = jamParsed.canvas[canvasY * 256 + canvasX];
+        if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return null;
 
-            const r = globalPalette[globalIdx * 3];
-            const g = globalPalette[globalIdx * 3 + 1];
-            const b = globalPalette[globalIdx * 3 + 2];
+        const tex = jamParsed.textures[selectedTextureIdx];
+        return { x, y, canvasX: tex.left + x, canvasY: tex.top + y };
+    }
 
-            status.innerText = `Pixel at (${x}, ${y}) - Index: ${globalIdx} - Color: rgb(${r},${g},${b})`;
-        }
+    function updateStatusHover(e) {
+        if (!jamParsed || !globalPalette) return;
+        const coords = mouseToTextureCoords(e);
+        if (!coords) return;
+
+        const globalIdx = jamParsed.canvas[coords.canvasY * 256 + coords.canvasX];
+        const r = globalPalette[globalIdx * 3];
+        const g = globalPalette[globalIdx * 3 + 1];
+        const b = globalPalette[globalIdx * 3 + 2];
+
+        status.innerText = `Pixel at (${coords.x}, ${coords.y}) - Index: ${globalIdx} - Color: rgb(${r},${g},${b})`;
     }
 
     function renderEditor() {
         if (!jamParsed || !globalPalette) return;
         const tex = jamParsed.textures[selectedTextureIdx];
-        const w = tex.width;
-        const h = tex.height;
-        const imageData = ctx.createImageData(w, h);
-
-        // Draw base texture
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                const canvasX = tex.left + x;
-                const canvasY = tex.top + y;
-                const globalIdx = jamParsed.canvas[canvasY * 256 + canvasX];
-
-                const r = globalPalette[globalIdx * 3];
-                const g = globalPalette[globalIdx * 3 + 1];
-                const b = globalPalette[globalIdx * 3 + 2];
-
-                const outIdx = (y * w + x) * 4;
-                imageData.data[outIdx] = r;
-                imageData.data[outIdx + 1] = g;
-                imageData.data[outIdx + 2] = b;
-                imageData.data[outIdx + 3] = 255;
-            }
-        }
-
-        ctx.putImageData(imageData, 0, 0);
+        ctx.putImageData(textureToImageData(tex), 0, 0);
         updatePasteOverlayDOM();
     }
 
@@ -875,38 +859,28 @@
 
     function draw(e) {
         if (!isDrawing || !jamParsed) return;
-        const rect = canvas.getBoundingClientRect();
-        // rect already accounts for CSS scaling, so we just use the mouse position relative to it
-        const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
-        const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
+        const coords = mouseToTextureCoords(e);
+        if (!coords) return;
 
-        if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
-            const tex = jamParsed.textures[selectedTextureIdx];
-            const canvasX = tex.left + x;
-            const canvasY = tex.top + y;
+        jamParsed.canvas[coords.canvasY * 256 + coords.canvasX] = selectedColorIdx;
 
-            jamParsed.canvas[canvasY * 256 + canvasX] = selectedColorIdx;
-
-            // Update just this pixel on canvas for speed
-            if (globalPalette) {
-                const r = globalPalette[selectedColorIdx * 3];
-                const g = globalPalette[selectedColorIdx * 3 + 1];
-                const b = globalPalette[selectedColorIdx * 3 + 2];
-                ctx.fillStyle = `rgb(${r},${g},${b})`;
-                ctx.fillRect(x, y, 1, 1);
-            }
-
-            // Update thumbnail
-            updateThumbnail(selectedTextureIdx);
+        // Update just this pixel on canvas for speed
+        if (globalPalette) {
+            const r = globalPalette[selectedColorIdx * 3];
+            const g = globalPalette[selectedColorIdx * 3 + 1];
+            const b = globalPalette[selectedColorIdx * 3 + 2];
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(coords.x, coords.y, 1, 1);
         }
+
     }
 
     function updateThumbnail(idx) {
         const tex = jamParsed.textures[idx];
         const item = textureList.children[idx];
-        const oldThumb = item.querySelector('.texture-thumbnail');
-        const newThumb = createThumbnail(tex);
-        item.replaceChild(newThumb, oldThumb);
+        const thumb = item.querySelector('.texture-thumbnail');
+        // Reuse existing canvas, just update pixel data
+        thumb.getContext('2d').putImageData(textureToImageData(tex), 0, 0);
     }
 
     async function handleSave() {
@@ -1033,37 +1007,21 @@
         pasteCtx.drawImage(img, 0, 0, pasteW, pasteH);
 
         // Quantize the paste image to GP2 palette so the preview shows the
-        // pixelated result in real time.
+        // pixelated result in real time (via WASM for speed).
         const pal = globalPalette;
         const pasteImgData = pasteCtx.getImageData(0, 0, pasteW, pasteH);
         const pastePixels = pasteImgData.data;
+        const gp2Indices = quantize_rgba_to_gp2_indices_wasm(pastePixels, 128);
         for (let i = 0; i < pastePixels.length; i += 4) {
-            const r = pastePixels[i];
-            const g = pastePixels[i + 1];
-            const b = pastePixels[i + 2];
             const a = pastePixels[i + 3];
-
             if (a < 128) {
                 pastePixels[i + 3] = 0;
                 continue;
             }
-
-            let bestIdx = 0;
-            let bestDist = Infinity;
-            for (let j = 0; j < 256; j++) {
-                const dr = r - pal[j * 3];
-                const dg = g - pal[j * 3 + 1];
-                const db = b - pal[j * 3 + 2];
-                const dist = dr * dr + dg * dg + db * db;
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestIdx = j;
-                }
-            }
-
-            pastePixels[i]     = pal[bestIdx * 3];
-            pastePixels[i + 1] = pal[bestIdx * 3 + 1];
-            pastePixels[i + 2] = pal[bestIdx * 3 + 2];
+            const idx = gp2Indices[i / 4];
+            pastePixels[i]     = pal[idx * 3];
+            pastePixels[i + 1] = pal[idx * 3 + 1];
+            pastePixels[i + 2] = pal[idx * 3 + 2];
             pastePixels[i + 3] = 255;
         }
         pasteCtx.putImageData(pasteImgData, 0, 0);
@@ -1105,7 +1063,6 @@
         const tex = jamParsed.textures[selectedTextureIdx];
         const texW = tex.width;
         const texH = tex.height;
-        const pal = globalPalette;
 
         // Render the paste overlay at its current position and scale into an
         // offscreen canvas the size of the texture, so we can read back pixels
@@ -1128,32 +1085,18 @@
 
         status.innerText = `Quantizing pasted region to ${texW}x${texH}...`;
 
+        // Quantize the entire region to GP2 indices via WASM (faster).
+        const gp2Indices = quantize_rgba_to_gp2_indices_wasm(pixels, 128);
         for (let y = 0; y < texH; y++) {
             for (let x = 0; x < texW; x++) {
                 const pi = (y * texW + x) * 4;
-                const r = pixels[pi];
-                const g = pixels[pi + 1];
-                const b = pixels[pi + 2];
                 const a = pixels[pi + 3];
 
                 // Skip pixels that are outside the paste bitmap (transparent)
                 if (a < 128) continue;
 
-                // Find nearest color in GP2 palette (Euclidean distance)
-                let bestIdx = 0;
-                let bestDist = Infinity;
-                for (let i = 0; i < 256; i++) {
-                    const dr = r - pal[i * 3];
-                    const dg = g - pal[i * 3 + 1];
-                    const db = b - pal[i * 3 + 2];
-                    const dist = dr * dr + dg * dg + db * db;
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestIdx = i;
-                    }
-                }
-
-                jamParsed.canvas[(tex.top + y) * 256 + tex.left + x] = bestIdx;
+                const idx = gp2Indices[y * texW + x];
+                jamParsed.canvas[(tex.top + y) * 256 + tex.left + x] = idx;
             }
         }
 
