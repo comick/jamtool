@@ -116,7 +116,29 @@ fn encode(meta_path: &Path, out_jam: &Path) -> Result<()> {
         })
         .collect::<Result<Vec<Vec<u8>>>>()?;
 
-    let (meta, jam_data) = jamtool::encode(&meta, &textures)?;
+    // Convert local-indexed pixels to global GP2 indices using the meta's
+    // haze-0 palette. encode() will repalettize internally.
+    let global_textures: Vec<Vec<u8>> = meta
+        .textures
+        .iter()
+        .zip(textures.iter())
+        .map(|(mt, img_local)| {
+            let qps = mt.tx.quarter_palette_size as usize;
+            let haze0 = &mt.pals[0];
+            let mut img_global = Vec::with_capacity(img_local.len());
+            for &local_idx in img_local {
+                let global_idx = if (local_idx as usize) < qps && qps <= haze0.len() {
+                    haze0[local_idx as usize]
+                } else {
+                    0
+                };
+                img_global.push(global_idx);
+            }
+            img_global
+        })
+        .collect();
+
+    let (meta, jam_data) = jamtool::encode(&meta, &global_textures)?;
     fs::write(out_jam, &jam_data).map_err(|e| format!("write {}: {}", out_jam.display(), e))?;
 
     println!(

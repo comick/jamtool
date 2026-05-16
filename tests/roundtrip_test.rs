@@ -67,14 +67,41 @@ fn run_encode(meta_path: &Path, out_jam: &Path) {
     let f = File::open(meta_path).expect("Failed to open meta file");
     let meta = parse_meta(BufReader::new(f)).expect("Failed to parse meta file");
     let meta_dir = meta_path.parent().unwrap_or(Path::new("."));
-    let mut textures = Vec::with_capacity(meta.textures.len());
-    for mt in &meta.textures {
-        let png_path = meta_dir.join(&mt.png_name);
-        let (img, _, _) = png::read_png_indexed(&png_path).expect("Failed to read PNG");
-        textures.push(img);
-    }
 
-    let (_, jam_data) = encode(&meta, &textures).expect("Failed to encode JAM");
+    // Read PNGs (pixel data contains local indices, 0..qps-1)
+    let local_textures: Vec<Vec<u8>> = meta
+        .textures
+        .iter()
+        .map(|mt| {
+            let png_path = meta_dir.join(&mt.png_name);
+            let (img, _, _) = png::read_png_indexed(&png_path).expect("Failed to read PNG");
+            img
+        })
+        .collect();
+
+    // Convert local indices -> global GP2 indices using the meta's haze-0 palette
+    let global_textures: Vec<Vec<u8>> = meta
+        .textures
+        .iter()
+        .zip(local_textures.iter())
+        .map(|(mt, img_local)| {
+            let qps = mt.tx.quarter_palette_size as usize;
+            let haze0 = &mt.pals[0];
+            let mut img_global = Vec::with_capacity(img_local.len());
+            for &local_idx in img_local {
+                let global_idx = if (local_idx as usize) < qps && qps <= haze0.len() {
+                    haze0[local_idx as usize]
+                } else {
+                    0
+                };
+                img_global.push(global_idx);
+            }
+            img_global
+        })
+        .collect();
+
+    // encode() repalettizes internally: global GP2 indices -> local indices
+    let (_, jam_data) = encode(&meta, &global_textures).expect("Failed to encode JAM");
     fs::write(out_jam, &jam_data).expect("Failed to write JAM");
 }
 

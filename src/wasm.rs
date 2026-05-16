@@ -56,19 +56,16 @@ pub fn encode_jam_wasm(parsed_js: JsValue) -> Result<Vec<u8>, JsValue> {
         })
         .collect();
 
-    let mut meta = JamMeta {
+    let meta = JamMeta {
         stem: String::new(),
         num_textures: parsed.num_textures,
         canvas_h: parsed.canvas_h,
         textures: meta_textures,
     };
 
-    // Use the core library's repalettize_textures
-    let (meta, texture_images) = crate::repalettize_textures(&mut meta, &texture_images_global)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
+    // encode() repalettizes internally: global GP2 indices -> local indices
     let (_, encoded) =
-        encode(&meta, &texture_images).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        encode(&meta, &texture_images_global).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(encoded)
 }
 
@@ -111,9 +108,35 @@ pub fn export_to_zip_files_wasm(parsed_js: JsValue, stem: &str) -> Result<JsValu
         }
 
         for haze in 0..4usize {
-            let (png_name, png_data) =
-                crate::png::export_texture_png(&parsed, t, haze, &global_pal)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let transparent = tx.transparent != 0;
+            let pal_off = crate::texture_palette_offset(&parsed, t);
+            let img_global = crate::extract_texture_image(&parsed, t);
+
+            // Convert global GP2 indices -> local indices using this haze's
+            // palette, so the PNG pixel values correctly index into the
+            // embedded palette.
+            let pal_slice = &parsed.palette_data[pal_off + haze * qps..][..qps];
+            let img_local: Vec<u8> = img_global
+                .iter()
+                .map(|&g| {
+                    pal_slice.iter().position(|&p| p == g).unwrap_or(0) as u8
+                })
+                .collect();
+
+            // Build RGB palette: local index i -> RGB color from global GP2
+            let rgb_pal = crate::png::build_palette(
+                &parsed.palette_data, pal_off, haze, qps, &global_pal,
+            );
+
+            let png_data = crate::png::encode_indexed_png_to_bytes(
+                &img_local, w, h, &rgb_pal, transparent,
+            )
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+            let png_name = format!(
+                "{}_t{:03}_id{:04}_h{}_{}x{}.png",
+                stem, t, tx.texture_id, haze + 1, w, h,
+            );
 
             files.push(ExportedFile {
                 name: png_name,
@@ -164,7 +187,7 @@ pub fn import_from_zip_files_wasm(meta_str: &str, pngs_js: JsValue) -> Result<Js
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Encode to JAM data (but we actually want JamParsed to update the editor)
+    // encode() repalettizes internally: global GP2 indices -> local indices
     let (meta, encoded_jam) = crate::encode(&meta, &texture_images_global)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 

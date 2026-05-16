@@ -531,13 +531,16 @@ pub fn parse_meta<R: BufRead>(reader: R) -> Result<JamMeta> {
     })
 }
 
-/// Encodes a JAM file from its internal structure.
+/// Encodes a JAM file from the provided metadata and **global GP2 indexed** texture images.
 ///
-/// It rebuilds the JAM canvas and palettes from the provided metadata and image data.
+/// The texture images must contain GP2 global indices (0-255), not local palette indices.
+/// The function will automatically repalettize: build local palettes from the unique
+/// global indices used, remap pixels to local indices, and encode the result.
+///
 /// The resulting JAM is encrypted.
 pub fn encode(meta: &JamMeta, textures: &[Vec<u8>]) -> Result<(JamMeta, Vec<u8>)> {
-    // Always repalettize to support images that were edited using a global palette.
-    let (meta, textures) = repalettize_textures(&meta, &textures)?;
+    // Repalettize: global GP2 indices -> local indices, rebuilding palettes
+    let (meta, textures) = repalettize_textures(meta, textures)?;
 
     let mut palette_data = Vec::new();
     for mt in &meta.textures {
@@ -612,12 +615,10 @@ pub fn encode(meta: &JamMeta, textures: &[Vec<u8>]) -> Result<(JamMeta, Vec<u8>)
     jam[canvas_start..canvas_start + canvas.len()].copy_from_slice(&canvas);
 
     decrypt_encrypt_jam(&mut jam);
-    Ok((meta, jam))
+    Ok((meta.clone(), jam))
 }
 
 /// Helper to map global-indexed image data to local-indexed data and rebuild local palettes.
-/// This is useful when you have images edited externally with a global palette and want to
-/// encode them into a JAM.
 fn repalettize_textures(
     meta_in: &JamMeta,
     texture_images_global: &[Vec<u8>],
