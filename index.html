@@ -267,6 +267,14 @@
             image-rendering: pixelated;
             image-rendering: -webkit-optimize-contrast;
         }
+        #paste-clip {
+            z-index: 9;
+            image-rendering: pixelated;
+            image-rendering: -webkit-optimize-contrast;
+            pointer-events: none;
+            background-repeat: no-repeat;
+        }
+
         .handle {
             position: absolute;
             width: 10px;
@@ -277,15 +285,12 @@
             cursor: nwse-resize;
             z-index: 11;
             box-sizing: border-box;
+            display: none;
         }
         .handle[data-corner="tr"],
         .handle[data-corner="bl"] {
             cursor: nesw-resize;
         }
-        .handle[data-corner="tl"] { top: -6px; left: -6px; }
-        .handle[data-corner="tr"] { top: -6px; right: -6px; }
-        .handle[data-corner="bl"] { bottom: -6px; left: -6px; }
-        .handle[data-corner="br"] { bottom: -6px; right: -6px; }
 
         #jam-file,
         #zip-file {
@@ -327,12 +332,12 @@
     </div>
     <div class="content-area">
         <canvas height="256" id="editor-canvas" width="256"></canvas>
-        <div id="paste-overlay" style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated;">
-            <div class="handle" data-corner="tl"></div>
-            <div class="handle" data-corner="tr"></div>
-            <div class="handle" data-corner="bl"></div>
-            <div class="handle" data-corner="br"></div>
-        </div>
+        <div id="paste-overlay" style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated; opacity:0.2;"></div>
+        <div id="paste-clip" style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated; opacity:1;"></div>
+        <div class="handle" data-corner="tl"></div>
+        <div class="handle" data-corner="tr"></div>
+        <div class="handle" data-corner="bl"></div>
+        <div class="handle" data-corner="br"></div>
     </div>
 </div>
 
@@ -371,11 +376,12 @@
 
     // Paste overlay DOM elements
     const pasteOverlay = document.getElementById('paste-overlay');
+    const pasteClip = document.getElementById('paste-clip');
     const pasteHandles = {
-        tl: pasteOverlay.querySelector('[data-corner="tl"]'),
-        tr: pasteOverlay.querySelector('[data-corner="tr"]'),
-        bl: pasteOverlay.querySelector('[data-corner="bl"]'),
-        br: pasteOverlay.querySelector('[data-corner="br"]'),
+        tl: document.querySelector('.handle[data-corner="tl"]'),
+        tr: document.querySelector('.handle[data-corner="tr"]'),
+        bl: document.querySelector('.handle[data-corner="bl"]'),
+        br: document.querySelector('.handle[data-corner="br"]'),
     };
 
     // Paste overlay state
@@ -689,6 +695,7 @@
     function selectTexture(idx) {
         // Clear any active paste overlay when switching textures
         pasteState = null;
+        pasteDataURL = null;
         selectedTextureIdx = idx;
         document.querySelectorAll('.texture-item').forEach((item, i) => {
             item.classList.toggle('selected', i === idx);
@@ -796,9 +803,13 @@
         updatePasteOverlayDOM();
     }
 
+    let pasteDataURL = null;
+
     function updatePasteOverlayDOM() {
-        if (!pasteState || !pasteState.bitmap) {
+        if (!pasteState || !pasteState.bitmap || !pasteDataURL) {
             pasteOverlay.style.display = 'none';
+            pasteClip.style.display = 'none';
+            for (const h of Object.values(pasteHandles)) h.style.display = 'none';
             return;
         }
         const rect = canvas.getBoundingClientRect();
@@ -806,12 +817,60 @@
         const zoom = rect.width / canvas.width;
         const pw = pasteState.bitmap.width;
         const ph = pasteState.bitmap.height;
+        const pasteW = pw * pasteState.scaleX * zoom;
+        const pasteH = ph * pasteState.scaleY * zoom;
+        const pasteLeft = rect.left - contentRect.left + pasteState.offsetX * zoom;
+        const pasteTop = rect.top - contentRect.top + pasteState.offsetY * zoom;
+        const canvasLeft = rect.left - contentRect.left;
+        const canvasTop = rect.top - contentRect.top;
+        const canvasW = rect.width;
+        const canvasH = rect.height;
 
+        // Clip the paste to the canvas bounds so the part extending beyond
+        // the texture is hidden.
+        const clipInTop    = Math.max(0, canvasTop - pasteTop);
+        const clipInLeft   = Math.max(0, canvasLeft - pasteLeft);
+        const clipInBottom = Math.max(0, (pasteTop + pasteH) - (canvasTop + canvasH));
+        const clipInRight  = Math.max(0, (pasteLeft + pasteW) - (canvasLeft + canvasW));
+
+        const bgCSS = `url(${pasteDataURL})`;
+
+        // 50% opacity overlay — full paste area, including overflow
         pasteOverlay.style.display = 'block';
-        pasteOverlay.style.left = (rect.left - contentRect.left + pasteState.offsetX * zoom) + 'px';
-        pasteOverlay.style.top = (rect.top - contentRect.top + pasteState.offsetY * zoom) + 'px';
-        pasteOverlay.style.width = (pw * pasteState.scaleX * zoom) + 'px';
-        pasteOverlay.style.height = (ph * pasteState.scaleY * zoom) + 'px';
+        pasteOverlay.style.left = pasteLeft + 'px';
+        pasteOverlay.style.top = pasteTop + 'px';
+        pasteOverlay.style.width = pasteW + 'px';
+        pasteOverlay.style.height = pasteH + 'px';
+        pasteOverlay.style.backgroundImage = bgCSS;
+        pasteOverlay.style.backgroundSize = '100% 100%';
+
+        // 100% opacity clip — same position/size, clipped to canvas bounds
+        pasteClip.style.display = 'block';
+        pasteClip.style.left = pasteLeft + 'px';
+        pasteClip.style.top = pasteTop + 'px';
+        pasteClip.style.width = pasteW + 'px';
+        pasteClip.style.height = pasteH + 'px';
+        pasteClip.style.backgroundImage = bgCSS;
+        pasteClip.style.backgroundSize = '100% 100%';
+        pasteClip.style.clipPath = `inset(${clipInTop}px ${clipInRight}px ${clipInBottom}px ${clipInLeft}px)`;
+
+        // Position handles at the four corners of the paste area (unclipped)
+        const hs = 5; // half-size of handle in screen pixels
+        for (const [id, el] of Object.entries(pasteHandles)) {
+            el.style.display = 'block';
+            el.style.left = '';
+            el.style.top = '';
+            el.style.right = '';
+            el.style.bottom = '';
+        }
+        pasteHandles.tl.style.left = (pasteLeft - hs) + 'px';
+        pasteHandles.tl.style.top = (pasteTop - hs) + 'px';
+        pasteHandles.tr.style.left = (pasteLeft + pasteW - 10 + hs) + 'px';
+        pasteHandles.tr.style.top = (pasteTop - hs) + 'px';
+        pasteHandles.bl.style.left = (pasteLeft - hs) + 'px';
+        pasteHandles.bl.style.top = (pasteTop + pasteH - 10 + hs) + 'px';
+        pasteHandles.br.style.left = (pasteLeft + pasteW - 10 + hs) + 'px';
+        pasteHandles.br.style.top = (pasteTop + pasteH - 10 + hs) + 'px';
     }
 
     function draw(e) {
@@ -1033,9 +1092,8 @@
             resizeStartOffsetY: 0,
         };
 
-        // Set the paste image as the overlay's background
-        pasteOverlay.style.backgroundImage = `url(${pasteCanvas.toDataURL()})`;
-        pasteOverlay.style.backgroundSize = '100% 100%';
+        // Store the data URL once and let updatePasteOverlayDOM apply it
+        pasteDataURL = pasteCanvas.toDataURL();
 
         renderEditor();
         status.innerText = `Image pasted. Drag to position, press Enter to commit.`;
@@ -1101,6 +1159,7 @@
 
         // Clean up paste state
         pasteState = null;
+        pasteDataURL = null;
 
         renderEditor();
         updateThumbnail(selectedTextureIdx);
