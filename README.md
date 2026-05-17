@@ -55,7 +55,17 @@ Output also includes images using the *haze* palettes, though they are not expli
 
 This takes the PNGs and the `.jammeta.txt` file from the directory and encodes them back into a single JAM file.
 
-### Web Editor
+### Web Editor Features
+
+- **Pixel painting** — select any GP2 palette color and draw on textures click-by-click or drag
+- **Zoom & pan** — slider, CTRL + scroll wheel, and fit-to-canvas for precise editing
+- **Paste images from clipboard** — paste any image, position it by dragging, resize freely with corner handles, and commit with Enter — preview is quantized to GP2 colors in real time
+- **Load & save .JAM** — open existing files and save modified ones
+- **Import/Export ZIP** — roundtrip to indexed PNGs with metadata for external editing
+- **Texture browser** — sidebar with thumbnails and detail panel showing all header fields
+- **Pixel inspector** — hover any pixel to see its global palette index and RGB color
+
+### Running Locally
 
 1. Build the WASM package (see above).
 2. Serve the project root using a web server (browsers block WASM via `file://`):

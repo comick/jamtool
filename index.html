@@ -267,6 +267,7 @@
             image-rendering: pixelated;
             image-rendering: -webkit-optimize-contrast;
         }
+
         #paste-clip {
             z-index: 9;
             image-rendering: pixelated;
@@ -287,6 +288,7 @@
             box-sizing: border-box;
             display: none;
         }
+
         .handle[data-corner="tr"],
         .handle[data-corner="bl"] {
             cursor: nesw-resize;
@@ -332,8 +334,10 @@
     </div>
     <div class="content-area">
         <canvas height="256" id="editor-canvas" width="256"></canvas>
-        <div id="paste-overlay" style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated; opacity:0.2;"></div>
-        <div id="paste-clip" style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated; opacity:1;"></div>
+        <div id="paste-overlay"
+             style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated; opacity:0.2;"></div>
+        <div id="paste-clip"
+             style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated; opacity:1;"></div>
         <div class="handle" data-corner="tl"></div>
         <div class="handle" data-corner="tr"></div>
         <div class="handle" data-corner="bl"></div>
@@ -352,7 +356,8 @@
 
 <div class="status-bar">
     <span id="status-text">Ready.</span>
-    <span>Source code at <a href="https://github.com/comick/jamtool" target="_blank">GitHub.com/comick/jamtool</a></span>
+    <span>Source code at <a href="https://github.com/comick/jamtool"
+                            target="_blank">GitHub.com/comick/jamtool</a></span>
 </div>
 
 <input accept=".JAM" id="jam-file" type="file">
@@ -387,11 +392,11 @@
 
     // Paste overlay state
     let pasteState = null; // null or { bitmap, offsetX, offsetY, scaleX, scaleY,
-                          //          isDragging, dragStartX, dragStartY, dragOffsetX, dragOffsetY,
-                          //          resizing (null|'tl'|'tr'|'bl'|'br'),
-                          //          resizeStartX, resizeStartY,
-                          //          resizeStartScaleX, resizeStartScaleY,
-                          //          resizeStartOffsetX, resizeStartOffsetY }
+    //          isDragging, dragStartX, dragStartY, dragOffsetX, dragOffsetY,
+    //          resizing (null|'tl'|'tr'|'bl'|'br'),
+    //          resizeStartX, resizeStartY,
+    //          resizeStartScaleX, resizeStartScaleY,
+    //          resizeStartOffsetX, resizeStartOffsetY }
 
     const canvas = document.getElementById('editor-canvas');
     const ctx = canvas.getContext('2d');
@@ -438,6 +443,7 @@
             status.innerText = jamParsed ? `JAM loaded.` : `Ready.`;
         });
         canvas.addEventListener('wheel', (e) => {
+            if (!e.ctrlKey) return;
             e.preventDefault();
             if (!jamParsed) return;
             const current = parseFloat(zoomSlider.value);
@@ -445,7 +451,7 @@
             const delta = e.deltaY > 0 ? -step : step;
             const next = Math.max(parseFloat(zoomSlider.min), Math.min(parseFloat(zoomSlider.max), current + delta));
             updateCanvasScale(next / 100.0);
-        }, { passive: false });
+        }, {passive: false});
         document.addEventListener('mousemove', (e) => {
             if (pasteState) {
                 const rect = canvas.getBoundingClientRect();
@@ -477,27 +483,50 @@
                         newScaleY = Math.max(minScale, (texY - fixed.br[1]) / ph);
                         newOffX = fixed.br[0];
                         newOffY = fixed.br[1];
+                        // Snap the moving corner (br = offset + visual) to integer
+                        const snappedW = Math.max(1, Math.round(newScaleX * pw));
+                        newScaleX = snappedW / pw;
+                        const snappedH = Math.max(1, Math.round(newScaleY * ph));
+                        newScaleY = snappedH / ph;
                     } else if (id === 'bl') {
                         newScaleX = Math.max(minScale, (fixed.bl[0] - texX) / pw);
                         newScaleY = Math.max(minScale, (texY - fixed.bl[1]) / ph);
                         newOffX = fixed.bl[0] - pw * newScaleX;
                         newOffY = fixed.bl[1];
+                        // Snap moving corner X to integer
+                        newOffX = Math.round(newOffX);
+                        newScaleX = (fixed.bl[0] - newOffX) / pw;
+                        // Snap moving corner Y to integer
+                        const snappedH = Math.max(1, Math.round(newScaleY * ph));
+                        newScaleY = snappedH / ph;
                     } else if (id === 'tr') {
                         newScaleX = Math.max(minScale, (texX - fixed.tr[0]) / pw);
                         newScaleY = Math.max(minScale, (fixed.tr[1] - texY) / ph);
                         newOffX = fixed.tr[0];
                         newOffY = fixed.tr[1] - ph * newScaleY;
+                        // Snap moving corner Y to integer
+                        newOffY = Math.round(newOffY);
+                        newScaleY = (fixed.tr[1] - newOffY) / ph;
+                        // Snap moving corner X to integer
+                        const snappedW = Math.max(1, Math.round(newScaleX * pw));
+                        newScaleX = snappedW / pw;
                     } else { // tl
                         newScaleX = Math.max(minScale, (fixed.tl[0] - texX) / pw);
                         newScaleY = Math.max(minScale, (fixed.tl[1] - texY) / ph);
                         newOffX = fixed.tl[0] - pw * newScaleX;
                         newOffY = fixed.tl[1] - ph * newScaleY;
+                        // Snap both moving corners to integer
+                        newOffX = Math.round(newOffX);
+                        newOffY = Math.round(newOffY);
+                        newScaleX = (fixed.tl[0] - newOffX) / pw;
+                        newScaleY = (fixed.tl[1] - newOffY) / ph;
                     }
 
                     pasteState.scaleX = newScaleX;
                     pasteState.scaleY = newScaleY;
                     pasteState.offsetX = newOffX;
                     pasteState.offsetY = newOffY;
+                    regeneratePastePreview();
                     renderEditor();
                     return;
                 }
@@ -505,8 +534,8 @@
                 if (pasteState.isDragging) {
                     const dx = e.clientX - pasteState.dragStartX;
                     const dy = e.clientY - pasteState.dragStartY;
-                    pasteState.offsetX = pasteState.dragOffsetX + dx / s;
-                    pasteState.offsetY = pasteState.dragOffsetY + dy / s;
+                    pasteState.offsetX = Math.round(pasteState.dragOffsetX + dx / s);
+                    pasteState.offsetY = Math.round(pasteState.dragOffsetY + dy / s);
                     renderEditor();
                     return;
                 }
@@ -675,7 +704,7 @@
             for (let x = 0; x < w; x++) {
                 const globalIdx = jamParsed.canvas[(tex.top + y) * 256 + tex.left + x];
                 const out = (y * w + x) * 4;
-                data[out]     = globalPalette[globalIdx * 3];
+                data[out] = globalPalette[globalIdx * 3];
                 data[out + 1] = globalPalette[globalIdx * 3 + 1];
                 data[out + 2] = globalPalette[globalIdx * 3 + 2];
                 data[out + 3] = 255;
@@ -696,7 +725,6 @@
     function selectTexture(idx) {
         // Clear any active paste overlay when switching textures
         pasteState = null;
-        pasteDataURL = null;
         selectedTextureIdx = idx;
         document.querySelectorAll('.texture-item').forEach((item, i) => {
             item.classList.toggle('selected', i === idx);
@@ -764,7 +792,7 @@
         if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return null;
 
         const tex = jamParsed.textures[selectedTextureIdx];
-        return { x, y, canvasX: tex.left + x, canvasY: tex.top + y };
+        return {x, y, canvasX: tex.left + x, canvasY: tex.top + y};
     }
 
     function updateStatusHover(e) {
@@ -787,10 +815,8 @@
         updatePasteOverlayDOM();
     }
 
-    let pasteDataURL = null;
-
     function updatePasteOverlayDOM() {
-        if (!pasteState || !pasteState.bitmap || !pasteDataURL) {
+        if (!pasteState || !pasteState.imageData || !pasteState.dataURL) {
             pasteOverlay.style.display = 'none';
             pasteClip.style.display = 'none';
             for (const h of Object.values(pasteHandles)) h.style.display = 'none';
@@ -812,12 +838,12 @@
 
         // Clip the paste to the canvas bounds so the part extending beyond
         // the texture is hidden.
-        const clipInTop    = Math.max(0, canvasTop - pasteTop);
-        const clipInLeft   = Math.max(0, canvasLeft - pasteLeft);
+        const clipInTop = Math.max(0, canvasTop - pasteTop);
+        const clipInLeft = Math.max(0, canvasLeft - pasteLeft);
         const clipInBottom = Math.max(0, (pasteTop + pasteH) - (canvasTop + canvasH));
-        const clipInRight  = Math.max(0, (pasteLeft + pasteW) - (canvasLeft + canvasW));
+        const clipInRight = Math.max(0, (pasteLeft + pasteW) - (canvasLeft + canvasW));
 
-        const bgCSS = `url(${pasteDataURL})`;
+        const bgCSS = `url(${pasteState.dataURL})`;
 
         // 50% opacity overlay — full paste area, including overflow
         pasteOverlay.style.display = 'block';
@@ -855,6 +881,49 @@
         pasteHandles.bl.style.top = (pasteTop + pasteH - 10 + hs) + 'px';
         pasteHandles.br.style.left = (pasteLeft + pasteW - 10 + hs) + 'px';
         pasteHandles.br.style.top = (pasteTop + pasteH - 10 + hs) + 'px';
+    }
+
+    /// Render the original ImageBitmap at (visualW x visualH) and quantize
+    /// to GP2 indices. Returns { canvas, ctx, imgData, gp2Indices }.
+    function renderOriginalAtScale(visualW, visualH) {
+        const canvas = document.createElement('canvas');
+        canvas.width = visualW;
+        canvas.height = visualH;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(pasteState.imageData, 0, 0, visualW, visualH);
+        const imgData = ctx.getImageData(0, 0, visualW, visualH);
+        const gp2Indices = quantize_rgba_to_gp2_indices_wasm(imgData.data, 128);
+        return {canvas, ctx, imgData, gp2Indices};
+    }
+
+    /// Re-render the paste preview from the original ImageBitmap at the
+    /// current scale and re-quantize, so the overlay shows properly pixelated
+    /// results instead of CSS-stretching the old quantized data.
+    function regeneratePastePreview() {
+        if (!pasteState || !pasteState.imageData || !globalPalette) return;
+        const pw = pasteState.bitmap.width;
+        const ph = pasteState.bitmap.height;
+        const visualW = Math.max(1, Math.round(pw * pasteState.scaleX));
+        const visualH = Math.max(1, Math.round(ph * pasteState.scaleY));
+
+        const {canvas: tempCanvas, ctx: tempCtx, imgData, gp2Indices} = renderOriginalAtScale(visualW, visualH);
+        const pixels = imgData.data;
+        for (let i = 0; i < pixels.length; i += 4) {
+            const a = pixels[i + 3];
+            if (a < 128) {
+                pixels[i + 3] = 0;
+                continue;
+            }
+            const idx = gp2Indices[i / 4];
+            pixels[i] = globalPalette[idx * 3];
+            pixels[i + 1] = globalPalette[idx * 3 + 1];
+            pixels[i + 2] = globalPalette[idx * 3 + 2];
+            pixels[i + 3] = 255;
+        }
+        tempCtx.putImageData(imgData, 0, 0);
+        pasteState.dataURL = tempCanvas.toDataURL();
+        updatePasteOverlayDOM();
     }
 
     function draw(e) {
@@ -1019,7 +1088,7 @@
                 continue;
             }
             const idx = gp2Indices[i / 4];
-            pastePixels[i]     = pal[idx * 3];
+            pastePixels[i] = pal[idx * 3];
             pastePixels[i + 1] = pal[idx * 3 + 1];
             pastePixels[i + 2] = pal[idx * 3 + 2];
             pastePixels[i + 3] = 255;
@@ -1032,6 +1101,7 @@
 
         pasteState = {
             bitmap: pasteCanvas,
+            imageData: img,
             offsetX: offsetX,
             offsetY: offsetY,
             scaleX: 1,
@@ -1048,25 +1118,25 @@
             resizeStartScaleY: 1,
             resizeStartOffsetX: 0,
             resizeStartOffsetY: 0,
+            dataURL: pasteCanvas.toDataURL(),
         };
-
-        // Store the data URL once and let updatePasteOverlayDOM apply it
-        pasteDataURL = pasteCanvas.toDataURL();
 
         renderEditor();
         status.innerText = `Image pasted. Drag to position, press Enter to commit.`;
     }
 
     function commitPaste() {
-        if (!pasteState || !pasteState.bitmap || !jamParsed || !globalPalette) return;
+        if (!pasteState || !pasteState.imageData || !jamParsed || !globalPalette) return;
 
         const tex = jamParsed.textures[selectedTextureIdx];
         const texW = tex.width;
         const texH = tex.height;
 
-        // Render the paste overlay at its current position and scale into an
-        // offscreen canvas the size of the texture, so we can read back pixels
-        // that fall within the texture boundaries.
+        // Render the original ImageBitmap at the current position and scale
+        // into an offscreen canvas the size of the texture, so we can read
+        // back pixels that fall within the texture boundaries.
+        const origW = pasteState.imageData.width;
+        const origH = pasteState.imageData.height;
         const pw = pasteState.bitmap.width;
         const ph = pasteState.bitmap.height;
         const offscreen = document.createElement('canvas');
@@ -1075,8 +1145,8 @@
         const offCtx = offscreen.getContext('2d');
         offCtx.imageSmoothingEnabled = false;
         offCtx.drawImage(
-            pasteState.bitmap,
-            0, 0, pw, ph,
+            pasteState.imageData,
+            0, 0, origW, origH,
             pasteState.offsetX, pasteState.offsetY,
             pw * pasteState.scaleX, ph * pasteState.scaleY
         );
@@ -1102,7 +1172,6 @@
 
         // Clean up paste state
         pasteState = null;
-        pasteDataURL = null;
 
         renderEditor();
         updateThumbnail(selectedTextureIdx);
