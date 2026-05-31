@@ -88,8 +88,10 @@ npx serve .
 
 I'm doing nothing new here, none of this would have been possible without the following resources:
 
-- [JAM Structure](https://www.grandprix2.de/Anleitung/tutus/Jam%20Structure/Jam%20Structure.html)
-- [GP2JAM Source Code](https://github.com/tkellaway/gp2-utils/tree/master/GP2JAM)
+- [JAM Structure](https://www.grandprix2.de/Anleitung/tutus/Jam%20Structure/Jam%20Structure.html) — original format documentation
+- [GP2JAM Source Code](https://github.com/tkellaway/gp2-utils/tree/master/GP2JAM) — Trevor Kellaway's reference implementation
+
+See [JAM.md](JAM.md) for a complete reference of the JAM file format as implemented by this project.
 
 ## License
 

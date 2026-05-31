@@ -9,7 +9,7 @@ pub fn write_png_indexed(
     indices: &[u8],
     w: usize,
     h: usize,
-    palette_rgb: &[u8; 768],
+    palette_rgb: &[u8; 256 * 3],
     transparent: bool,
 ) -> Result<()> {
     let f = File::create(path).map_err(|e| format!("create {}: {}", path.display(), e))?;
