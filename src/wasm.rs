@@ -52,7 +52,7 @@ pub fn encode_jam_wasm(parsed_js: JsValue) -> Result<Vec<u8>, JsValue> {
         .map(|tex| MetaTexture {
             tx: tex,
             png_name: String::new(),
-            pals: [vec![], vec![], vec![], vec![]],
+            palette: vec![],
         })
         .collect();
 
@@ -133,14 +133,14 @@ pub fn export_to_zip_files_wasm(parsed_js: JsValue, stem: &str) -> Result<JsValu
 
     // 1. Metadata
     let mut meta_content = Vec::new();
-    crate::write_meta(&mut meta_content, stem, &parsed)
+    crate::write_meta_json(&mut meta_content, stem, &parsed)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     files.push(ExportedFile {
-        name: format!("{}.jammeta.txt", stem),
+        name: format!("{}.json", stem),
         data: meta_content,
     });
 
-    // 2. PNGs (equivalent to CLI)
+    // 2. PNGs (one per texture)
     let global_pal = crate::palette::GP2_PALETTE;
     for t in 0..parsed.textures.len() {
         let tx = &parsed.textures[t];
@@ -157,51 +157,45 @@ pub fn export_to_zip_files_wasm(parsed_js: JsValue, stem: &str) -> Result<JsValu
             continue;
         }
 
-        for haze in 0..4usize {
-            let transparent = tx.transparent != 0;
-            let pal_off = crate::texture_palette_offset(&parsed, t);
-            let img_global = crate::extract_texture_image(&parsed, t);
+        let transparent = tx.transparent != 0;
+        let pal_off = crate::texture_palette_offset(&parsed, t);
+        let img_global = crate::extract_texture_image(&parsed, t);
 
-            // Convert global GP2 indices -> local indices using this haze's
-            // palette, so the PNG pixel values correctly index into the
-            // embedded palette.
-            let pal_slice = &parsed.palette_data[pal_off + haze * qps..][..qps];
-            let img_local: Vec<u8> = img_global
-                .iter()
-                .map(|&g| {
-                    pal_slice.iter().position(|&p| p == g).unwrap_or(0) as u8
-                })
-                .collect();
+        // Convert global GP2 indices -> local indices using haze-0 palette,
+        // so the PNG pixel values correctly index into the embedded palette.
+        let pal_slice = &parsed.palette_data[pal_off..][..qps];
+        let img_local: Vec<u8> = img_global
+            .iter()
+            .map(|&g| {
+                pal_slice.iter().position(|&p| p == g).unwrap_or(0) as u8
+            })
+            .collect();
 
-            // Build RGB palette: local index i -> RGB color from global GP2
-            let rgb_pal = crate::png::build_palette(
-                &parsed.palette_data, pal_off, haze, qps, &global_pal,
-            );
+        // Build RGB palette: local index i -> RGB color from global GP2
+        let rgb_pal = crate::png::build_palette(
+            &parsed.palette_data, pal_off, 0, qps, &global_pal,
+        );
 
-            let png_data = crate::png::encode_indexed_png_to_bytes(
-                &img_local, w, h, &rgb_pal, transparent,
-            )
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let png_data = crate::png::encode_indexed_png_to_bytes(
+            &img_local, w, h, &rgb_pal, transparent,
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-            let png_name = format!(
-                "{}_t{:03}_id{:04}_h{}_{}x{}.png",
-                stem, t, tx.texture_id, haze + 1, w, h,
-            );
+        let png_name = format!("{}_{}.png", stem, t);
 
-            files.push(ExportedFile {
-                name: png_name,
-                data: png_data,
-            });
-        }
+        files.push(ExportedFile {
+            name: png_name,
+            data: png_data,
+        });
     }
 
     serde_wasm_bindgen::to_value(&files).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
-pub fn import_from_zip_files_wasm(meta_str: &str, pngs_js: JsValue) -> Result<JsValue, JsValue> {
+pub fn import_from_zip_files_wasm(meta_str: &str, stem: &str, pngs_js: JsValue) -> Result<JsValue, JsValue> {
     let meta =
-        crate::parse_meta(meta_str.as_bytes()).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        crate::parse_meta_json(meta_str.as_bytes(), stem).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // pngs_js should be a Map or an Object: filename -> Uint8Array
     let pngs: serde_json::Value =

@@ -1118,9 +1118,9 @@
             let metaFile = null;
             let metaContent = null;
 
-            // Find jammeta.txt
+            // Find the meta json (exactly one .json file expected)
             for (const name in zip.files) {
-                if (name.endsWith('.jammeta.txt')) {
+                if (name.endsWith('.json')) {
                     metaFile = name;
                     metaContent = await zip.files[name].async("string");
                     break;
@@ -1128,8 +1128,9 @@
             }
 
             if (!metaContent) {
-                throw new Error("No .jammeta.txt found in ZIP");
+                throw new Error("No .json file found in ZIP");
             }
+            const stem = metaFile.replace('.json', '');
 
             // Load all PNGs
             const pngs = {};
@@ -1141,7 +1142,7 @@
             }
 
             status.innerText = "Importing from ZIP...";
-            jamParsed = import_from_zip_files_wasm(metaContent, pngs);
+            jamParsed = import_from_zip_files_wasm(metaContent, stem, pngs);
             console.log("JAM imported from ZIP", jamParsed);
 
             renderTextureList();

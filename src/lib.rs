@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{BufRead, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -59,17 +59,23 @@ pub struct JamParsed {
     pub canvas: Vec<u8>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MetaTexture {
+    #[serde(flatten)]
     pub tx: JamTexture,
+    #[serde(rename = "png")]
     pub png_name: String,
-    pub pals: [Vec<u8>; 4],
+    #[serde(rename = "palette")]
+    pub palette: Vec<u8>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JamMeta {
+    #[serde(skip)]
     pub stem: String,
+    #[serde(skip)]
     pub num_textures: u16,
+    #[serde(skip)]
     pub canvas_h: u16,
     pub textures: Vec<MetaTexture>,
 }
@@ -238,66 +244,44 @@ pub fn canvas_to_global_indices(parsed: &JamParsed) -> Vec<u8> {
     global
 }
 
-pub fn write_meta<W: Write>(mut f: W, stem: &str, parsed: &JamParsed) -> Result<()> {
-    writeln!(f, "JAMMETA 1")?;
-    writeln!(f, "stem {}", stem)?;
-    writeln!(f, "num_textures {}", parsed.num_textures)?;
-    writeln!(f, "canvas_h {}", parsed.canvas_h)?;
-
+pub fn write_meta_json<W: Write>(f: W, stem: &str, parsed: &JamParsed) -> Result<()> {
     let mut pal_off = 0usize;
+    let mut meta_textures = Vec::with_capacity(parsed.textures.len());
     for (t, tx) in parsed.textures.iter().enumerate() {
         let qps = tx.quarter_palette_size as usize;
-        writeln!(
-            f,
-            "texture {} left {} top {} width {} height {} unk02 {} unk08 {} unk0a {} image_ptr {} unk0e {} qps {} texture_id {} transparent {} unk16 {} unk17 {} png {}_t{:03}_id{:04}_h1_{}x{}.png",
-            t,
-            tx.left,
-            tx.top,
-            tx.width,
-            tx.height,
-            tx.unk02,
-            tx.unk08,
-            tx.unk0a,
-            tx.image_ptr,
-            tx.unk0e,
-            tx.quarter_palette_size,
-            tx.texture_id,
-            tx.transparent,
-            tx.unk16,
-            tx.unk17,
-            stem,
-            t,
-            tx.texture_id,
-            tx.width,
-            tx.height
-        )?;
-
-        write!(f, "unk18")?;
-        for v in tx.unk18 {
-            write!(f, " {}", v)?;
-        }
-        writeln!(f)?;
-
-        for haze in 0..4usize {
-            write!(f, "pal{}", haze + 1)?;
-            for i in 0..qps {
-                write!(f, " {}", parsed.palette_data[pal_off + haze * qps + i])?;
-            }
-            writeln!(f)?;
-        }
-
+        let palette = parsed.palette_data[pal_off..pal_off + qps].to_vec();
         pal_off += qps * 4;
+
+        let png_name = format!("{}_{}.png", stem, t);
+
+        meta_textures.push(MetaTexture {
+            tx: tx.clone(),
+            png_name,
+            palette,
+        });
     }
 
+    let canvas_h = meta_textures
+        .iter()
+        .map(|mt| mt.tx.top as u16 + mt.tx.height)
+        .max()
+        .unwrap_or(0);
+    let meta = JamMeta {
+        stem: stem.to_string(),
+        num_textures: meta_textures.len() as u16,
+        canvas_h,
+        textures: meta_textures,
+    };
+
+    serde_json::to_writer(f, &meta)?;
     Ok(())
 }
 
-// TODO drop
-pub fn write_meta_file(path: &Path, stem: &str, parsed: &JamParsed) -> Result<()> {
+pub fn write_meta_json_file(path: &Path, stem: &str, parsed: &JamParsed) -> Result<()> {
     let f = BufWriter::new(
         File::create(path).map_err(|e| format!("create {}: {}", path.display(), e))?,
     );
-    write_meta(f, stem, parsed)
+    write_meta_json(f, stem, parsed)
 }
 
 /// Decodes a JAM file into internal structure.
@@ -317,218 +301,43 @@ pub fn decode(jam_path: &Path) -> Result<JamParsed> {
     Ok(parsed)
 }
 
-fn parse_meta_texture(line: &str) -> Result<(usize, JamTexture, String)> {
-    let parts = line.split_whitespace().collect::<Vec<_>>();
-    if parts.len() < 32 || parts[0] != "texture" {
-        return Err("Invalid texture line in metadata".into());
+pub fn parse_meta_json<R: std::io::Read>(reader: R, stem: &str) -> Result<JamMeta> {
+    let mut meta: JamMeta = serde_json::from_reader(reader)?;
+    meta.stem = stem.to_string();
+    meta.num_textures = meta.textures.len() as u16;
+
+    if meta.num_textures == 0 {
+        return Err("Invalid metadata: no textures".into());
     }
 
-    let mut i = 1usize;
-    let parse_u16 = |s: &str| -> Result<u16> { Ok(s.parse::<u16>()?) };
-    let parse_u8 = |s: &str| -> Result<u8> {
-        let v = s.parse::<u16>()?;
-        if v > 255 {
-            return Err(format!("value {} out of u8 range", v).into());
-        }
-        Ok(v as u8)
-    };
-
-    let tex_index = parts[i].parse::<usize>()?;
-    i += 1;
-
-    let expect = |parts: &[&str], i: &mut usize, key: &str| -> Result<()> {
-        if parts.get(*i).copied() != Some(key) {
-            return Err(format!("Expected {} in texture line", key).into());
-        }
-        *i += 1;
-        Ok(())
-    };
-
-    expect(&parts, &mut i, "left")?;
-    let left = parse_u8(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "top")?;
-    let top = parse_u8(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "width")?;
-    let width = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "height")?;
-    let height = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "unk02")?;
-    let unk02 = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "unk08")?;
-    let unk08 = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "unk0a")?;
-    let unk0a = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "image_ptr")?;
-    let image_ptr = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "unk0e")?;
-    let unk0e = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "qps")?;
-    let qps = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "texture_id")?;
-    let texture_id = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "transparent")?;
-    let transparent = parse_u16(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "unk16")?;
-    let unk16 = parse_u8(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "unk17")?;
-    let unk17 = parse_u8(parts[i])?;
-    i += 1;
-    expect(&parts, &mut i, "png")?;
-    let png_name = parts[i].to_string();
-
-    let tx = JamTexture {
-        left,
-        top,
-        unk02,
-        width,
-        height,
-        unk08,
-        unk0a,
-        image_ptr,
-        unk0e,
-        quarter_palette_size: qps,
-        texture_id,
-        transparent,
-        unk16,
-        unk17,
-        unk18: [0u8; 8],
-    };
-
-    Ok((tex_index, tx, png_name))
-}
-
-pub fn parse_meta<R: BufRead>(reader: R) -> Result<JamMeta> {
-    let mut lines = reader.lines();
-
-    let hdr = lines.next().transpose()?.ok_or_else(|| "empty meta file")?;
-    if hdr.trim() != "JAMMETA 1" {
-        return Err("Invalid metadata format header".into());
-    }
-
-    let stem_line = lines
-        .next()
-        .transpose()?
-        .ok_or_else(|| "Missing stem in metadata")?;
-    let stem = stem_line
-        .strip_prefix("stem ")
-        .ok_or_else(|| "Missing stem in metadata")?
-        .trim()
-        .to_string();
-
-    let nt_line = lines
-        .next()
-        .transpose()?
-        .ok_or_else(|| "Missing num_textures in metadata")?;
-    let num_textures: u16 = nt_line
-        .strip_prefix("num_textures ")
-        .ok_or_else(|| "Missing num_textures in metadata")?
-        .trim()
-        .parse()?;
-
-    let ch_line = lines
-        .next()
-        .transpose()?
-        .ok_or_else(|| "Missing canvas_h in metadata")?;
-    let canvas_h: u16 = ch_line
-        .strip_prefix("canvas_h ")
-        .ok_or_else(|| "Missing canvas_h in metadata")?
-        .trim()
-        .parse()?;
-
-    if num_textures == 0 || canvas_h == 0 {
-        return Err(format!(
-            "Invalid metadata: num_textures={} canvas_h={}",
-            num_textures, canvas_h
-        )
-        .into());
-    }
-
-    let mut textures = Vec::with_capacity(num_textures as usize);
-    for t in 0..num_textures as usize {
-        let tline = lines
-            .next()
-            .transpose()?
-            .ok_or_else(|| "Invalid texture line in metadata")?;
-        let (tex_index, mut tx, png_name) = parse_meta_texture(&tline)?;
-        if tex_index != t {
-            return Err(format!("Invalid texture values in metadata at texture {}", t).into());
-        }
-        let qps = tx.quarter_palette_size as usize;
+    for (t, mt) in meta.textures.iter().enumerate() {
+        let qps = mt.tx.quarter_palette_size as usize;
         if qps > 256
-            || tx.width == 0
-            || tx.height == 0
-            || tx.left as usize + tx.width as usize > CANVAS_W
-            || tx.top as usize + tx.height as usize > canvas_h as usize
+            || mt.tx.width == 0
+            || mt.tx.height == 0
+            || mt.tx.left as usize + mt.tx.width as usize > CANVAS_W
         {
             return Err(format!("Invalid texture values in metadata at texture {}", t).into());
         }
-
-        let unk_line = lines
-            .next()
-            .transpose()?
-            .ok_or_else(|| format!("Missing unk18 line for texture {}", t))?;
-        let parts = unk_line.split_whitespace().collect::<Vec<_>>();
-        if parts.len() != 9 || parts[0] != "unk18" {
-            return Err(format!("Invalid unk18 values for texture {}", t).into());
+        if mt.palette.len() != qps {
+            return Err(format!(
+                "Palette size mismatch for texture {}: got {} expected {}",
+                t,
+                mt.palette.len(),
+                qps
+            )
+            .into());
         }
-        for i in 0..8usize {
-            tx.unk18[i] = parts[i + 1].parse::<u16>()?.min(255) as u8;
-        }
-
-        let mut pals = [
-            Vec::<u8>::new(),
-            Vec::<u8>::new(),
-            Vec::<u8>::new(),
-            Vec::<u8>::new(),
-        ];
-        for haze in 0..4usize {
-            let pline = lines
-                .next()
-                .transpose()?
-                .ok_or_else(|| format!("Missing palette line for texture {}", t))?;
-            let pparts = pline.split_whitespace().collect::<Vec<_>>();
-            let expected = format!("pal{}", haze + 1);
-            if pparts.first().copied() != Some(expected.as_str()) {
-                return Err(format!("Expected {} line for texture {}", expected, t).into());
-            }
-            if pparts.len() < 1 + qps {
-                return Err(format!(
-                    "Not enough palette entries for texture {} haze {}",
-                    t,
-                    haze + 1
-                )
-                .into());
-            }
-            let mut p = Vec::with_capacity(qps);
-            for idx in 0..qps {
-                let v = pparts[idx + 1].parse::<u16>()?;
-                p.push((v & 0xff) as u8);
-            }
-            pals[haze] = p;
-        }
-
-        textures.push(MetaTexture { tx, png_name, pals });
     }
 
-    Ok(JamMeta {
-        stem,
-        num_textures,
-        canvas_h,
-        textures,
-    })
+    meta.canvas_h = meta
+        .textures
+        .iter()
+        .map(|mt| mt.tx.top as u16 + mt.tx.height)
+        .max()
+        .unwrap_or(0);
+
+    Ok(meta)
 }
 
 /// Encodes a JAM file from the provided metadata and **global GP2 indexed** texture images.
@@ -545,11 +354,12 @@ pub fn encode(meta: &JamMeta, textures: &[Vec<u8>]) -> Result<(JamMeta, Vec<u8>)
     let mut palette_data = Vec::new();
     for mt in &meta.textures {
         let qps = mt.tx.quarter_palette_size as usize;
-        for haze in 0..4usize {
-            if mt.pals[haze].len() != qps {
-                return Err("invalid palette size in metadata".into());
-            }
-            palette_data.extend_from_slice(&mt.pals[haze]);
+        if mt.palette.len() != qps {
+            return Err("invalid palette size in metadata".into());
+        }
+        // Replicate the single palette for all 4 hazes
+        for _ in 0..4 {
+            palette_data.extend_from_slice(&mt.palette);
         }
     }
 
@@ -663,9 +473,7 @@ fn repalettize_textures(
         }
         new_texture_images.push(img_local);
 
-        for haze in 0..4 {
-            mt.pals[haze] = local_pal.clone();
-        }
+        mt.palette = local_pal;
     }
 
     Ok((meta_out, new_texture_images))

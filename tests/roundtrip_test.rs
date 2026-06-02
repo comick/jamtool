@@ -1,6 +1,6 @@
 use jamtool::encode;
 use jamtool::png;
-use jamtool::{decode, parse_meta};
+use jamtool::{decode, parse_meta_json};
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -20,10 +20,9 @@ fn run_decode(infile: &Path, outdir: &Path) {
 
     let global_pal = jamtool::palette::GP2_PALETTE;
 
-    let meta_path = outdir.join(format!("{}.jammeta.txt", stem));
-    jamtool::write_meta_file(&meta_path, &stem, &parsed).expect("Failed to write meta");
+    let meta_path = outdir.join(format!("{}.json", stem));
+    jamtool::write_meta_json_file(&meta_path, &stem, &parsed).expect("Failed to write meta");
 
-    let mut pal_off = 0usize;
     for (t, tx) in parsed.textures.iter().enumerate() {
         let w = tx.width as usize;
         let h = tx.height as usize;
@@ -33,39 +32,22 @@ fn run_decode(infile: &Path, outdir: &Path) {
         let transparent = tx.transparent != 0;
 
         if w == 0 || h == 0 || x + w > jamtool::CANVAS_W || y + h > parsed.canvas_h as usize {
-            pal_off += qps * 4;
             continue;
         }
 
-        let mut img = vec![0u8; w * h];
-        for yy in 0..h {
-            let src = (y + yy) * jamtool::CANVAS_W + x;
-            let dst = yy * w;
-            img[dst..dst + w].copy_from_slice(&parsed.canvas[src..src + w]);
-        }
+        let rgb_pal = png::build_palette(&parsed.palette_data, 0, 0, qps, &global_pal);
 
-        for haze in 0..4usize {
-            let rgb_pal = png::build_palette(&parsed.palette_data, pal_off, haze, qps, &global_pal);
-
-            let out = outdir.join(format!(
-                "{}_t{:03}_id{:04}_h{}_{}x{}.png",
-                stem,
-                t,
-                tx.texture_id,
-                haze + 1,
-                w,
-                h
-            ));
-            png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)
-                .expect("Failed to write PNG");
-        }
-        pal_off += qps * 4;
+        let out = outdir.join(format!("{}_{}.png", stem, t));
+        let img = jamtool::extract_texture_image(&parsed, t);
+        png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)
+            .expect("Failed to write PNG");
     }
 }
 
 fn run_encode(meta_path: &Path, out_jam: &Path) {
     let f = File::open(meta_path).expect("Failed to open meta file");
-    let meta = parse_meta(BufReader::new(f)).expect("Failed to parse meta file");
+    let meta_stem = meta_path.file_stem().unwrap().to_string_lossy().to_string();
+    let meta = parse_meta_json(BufReader::new(f), &meta_stem).expect("Failed to parse meta file");
     let meta_dir = meta_path.parent().unwrap_or(Path::new("."));
 
     // Read PNGs (pixel data contains local indices, 0..qps-1)
@@ -79,18 +61,18 @@ fn run_encode(meta_path: &Path, out_jam: &Path) {
         })
         .collect();
 
-    // Convert local indices -> global GP2 indices using the meta's haze-0 palette
+    // Convert local indices -> global GP2 indices using the meta's palette
     let global_textures: Vec<Vec<u8>> = meta
         .textures
         .iter()
         .zip(local_textures.iter())
         .map(|(mt, img_local)| {
             let qps = mt.tx.quarter_palette_size as usize;
-            let haze0 = &mt.pals[0];
+            let pal = &mt.palette;
             let mut img_global = Vec::with_capacity(img_local.len());
             for &local_idx in img_local {
-                let global_idx = if (local_idx as usize) < qps && qps <= haze0.len() {
-                    haze0[local_idx as usize]
+                let global_idx = if (local_idx as usize) < qps && qps <= pal.len() {
+                    pal[local_idx as usize]
                 } else {
                     0
                 };
@@ -134,7 +116,7 @@ fn compare_dirs(dir1: &Path, dir2: &Path, prefix1: &str, prefix2: &str) {
             name1
         );
 
-        if name1.ends_with(".jammeta.txt") || name1.ends_with(".png") {
+        if name1.ends_with(".json") || name1.ends_with(".png") {
             // Meta files might have different PNG filenames in them if prefix changed
             // PNGs might have different palette indices but represent the same image
             continue;
@@ -185,7 +167,7 @@ fn run_roundtrip_test(jam_name: &str) {
     // Verify against golden
     compare_dirs(golden_dir, test_out, jam_name, jam_name);
 
-    let meta_path = test_out.join(format!("{}.jammeta.txt", jam_name));
+    let meta_path = test_out.join(format!("{}.json", jam_name));
     assert!(meta_path.exists());
 
     // 2. Encode

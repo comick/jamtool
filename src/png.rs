@@ -129,15 +129,7 @@ pub fn export_texture_png(
     let rgb_pal = build_palette(&parsed.palette_data, pal_off, haze, qps, global_pal);
     let png_data = encode_indexed_png_to_bytes(&img, w, h, &rgb_pal, transparent)?;
 
-    let filename = format!(
-        "{}_t{:03}_id{:04}_h{}_{}x{}.png",
-        parsed.stem,
-        tex_idx,
-        tx.texture_id,
-        haze + 1,
-        w,
-        h
-    );
+    let filename = format!("{}_{}.png", parsed.stem, tex_idx);
 
     Ok((filename, png_data))
 }
