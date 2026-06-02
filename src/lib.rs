@@ -428,6 +428,20 @@ pub fn encode(meta: &JamMeta, textures: &[Vec<u8>]) -> Result<(JamMeta, Vec<u8>)
     Ok((meta.clone(), jam))
 }
 
+/// Convert local-indexed pixel data to global GP2 indices using a palette (local→global mapping).
+pub fn local_to_global_indices(img_local: &[u8], palette: &[u8], qps: usize) -> Vec<u8> {
+    img_local
+        .iter()
+        .map(|&local_idx| {
+            if (local_idx as usize) < qps && qps <= palette.len() {
+                palette[local_idx as usize]
+            } else {
+                0
+            }
+        })
+        .collect()
+}
+
 /// Helper to map global-indexed image data to local-indexed data and rebuild local palettes.
 fn repalettize_textures(
     meta_in: &JamMeta,

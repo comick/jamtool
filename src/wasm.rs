@@ -239,17 +239,7 @@ pub fn import_from_zip_files_wasm(meta_str: &str, stem: &str, pngs_js: JsValue) 
         .zip(texture_images_global.iter())
         .map(|(mt, img_local)| {
             let qps = mt.tx.quarter_palette_size as usize;
-            let pal = &mt.palette;
-            let mut img_global = Vec::with_capacity(img_local.len());
-            for &local_idx in img_local {
-                let global_idx = if (local_idx as usize) < qps && qps <= pal.len() {
-                    pal[local_idx as usize]
-                } else {
-                    0
-                };
-                img_global.push(global_idx);
-            }
-            img_global
+            crate::local_to_global_indices(img_local, &mt.palette, qps)
         })
         .collect();
 

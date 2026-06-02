@@ -1,6 +1,5 @@
-use jamtool::encode;
 use jamtool::png;
-use jamtool::{decode, parse_meta_json};
+use jamtool::{decode, encode, parse_meta_json};
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -23,25 +22,11 @@ fn run_decode(infile: &Path, outdir: &Path) {
     let meta_path = outdir.join(format!("{}.json", stem));
     jamtool::write_meta_json_file(&meta_path, &stem, &parsed).expect("Failed to write meta");
 
-    for (t, tx) in parsed.textures.iter().enumerate() {
-        let w = tx.width as usize;
-        let h = tx.height as usize;
-        let x = tx.left as usize;
-        let y = tx.top as usize;
-        let qps = tx.quarter_palette_size as usize;
-        let transparent = tx.transparent != 0;
-
-        if w == 0 || h == 0 || x + w > jamtool::CANVAS_W || y + h > parsed.canvas_h as usize {
-            continue;
-        }
-
-        let pal_off = jamtool::texture_palette_offset(&parsed, t);
-        let rgb_pal = png::build_palette(&parsed.palette_data, pal_off, 0, qps, &global_pal);
-
-        let out = outdir.join(format!("{}_{}.png", stem, t));
-        let img = jamtool::extract_texture_image(&parsed, t);
-        png::write_png_indexed(&out, &img, w, h, &rgb_pal, transparent)
-            .expect("Failed to write PNG");
+    for t in 0..parsed.textures.len() {
+        let (name, png_data) = jamtool::png::export_texture_png(&parsed, t, 0, &global_pal)
+            .expect("Failed to export texture PNG");
+        let out = outdir.join(&name);
+        std::fs::write(&out, &png_data).expect("Failed to write PNG");
     }
 }
 
@@ -69,17 +54,7 @@ fn run_encode(meta_path: &Path, out_jam: &Path) {
         .zip(local_textures.iter())
         .map(|(mt, img_local)| {
             let qps = mt.tx.quarter_palette_size as usize;
-            let pal = &mt.palette;
-            let mut img_global = Vec::with_capacity(img_local.len());
-            for &local_idx in img_local {
-                let global_idx = if (local_idx as usize) < qps && qps <= pal.len() {
-                    pal[local_idx as usize]
-                } else {
-                    0
-                };
-                img_global.push(global_idx);
-            }
-            img_global
+            jamtool::local_to_global_indices(img_local, &mt.palette, qps)
         })
         .collect();
 
