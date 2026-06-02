@@ -249,16 +249,27 @@ pub fn write_meta_json<W: Write>(f: W, stem: &str, parsed: &JamParsed) -> Result
     let mut meta_textures = Vec::with_capacity(parsed.textures.len());
     for (t, tx) in parsed.textures.iter().enumerate() {
         let qps = tx.quarter_palette_size as usize;
-        let palette = parsed.palette_data[pal_off..pal_off + qps].to_vec();
+        let (palette, meta_qps) = if qps == 0 {
+            // qps=0 means canvas pixels ARE global GP2 indices.
+            // Store identity palette so re-encode works correctly.
+            ((0u8..=255).collect::<Vec<_>>(), 256)
+        } else {
+            (parsed.palette_data[pal_off..pal_off + qps].to_vec(), qps)
+        };
         pal_off += qps * 4;
 
         let png_name = format!("{}_{}.png", stem, t);
-
-        meta_textures.push(MetaTexture {
+        let mut mt = MetaTexture {
             tx: tx.clone(),
             png_name,
             palette,
-        });
+        };
+        // Override qps in the meta for qps=0 textures
+        if qps == 0 {
+            mt.tx.quarter_palette_size = meta_qps as u16;
+        }
+
+        meta_textures.push(mt);
     }
 
     let canvas_h = meta_textures

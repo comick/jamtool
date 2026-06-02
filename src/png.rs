@@ -126,7 +126,15 @@ pub fn export_texture_png(
     let pal_off = texture_palette_offset(parsed, tex_idx);
 
     let img = extract_texture_image(parsed, tex_idx);
-    let rgb_pal = build_palette(&parsed.palette_data, pal_off, haze, qps, global_pal);
+    let rgb_pal = if qps == 0 {
+        // qps=0 means canvas pixels ARE global GP2 indices directly.
+        // Build full RGB palette from the global GP2 palette.
+        let mut pal = [0u8; 768];
+        pal.copy_from_slice(&global_pal[..768.min(global_pal.len())]);
+        pal
+    } else {
+        build_palette(&parsed.palette_data, pal_off, haze, qps, global_pal)
+    };
     let png_data = encode_indexed_png_to_bytes(&img, w, h, &rgb_pal, transparent)?;
 
     let filename = format!("{}_{}.png", parsed.stem, tex_idx);
