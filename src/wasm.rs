@@ -157,8 +157,9 @@ pub fn export_to_zip_files_wasm(parsed_js: JsValue, stem: &str) -> Result<JsValu
             continue;
         }
 
-        let transparent = tx.transparent != 0;
         let pal_off = crate::texture_palette_offset(&parsed, t);
+        // Only enable PNG transparency if local index 0 maps to GP2 index 0
+        let transparent = tx.transparent != 0 && parsed.palette_data[pal_off] == 0;
         let img_global = crate::extract_texture_image(&parsed, t);
 
         // Convert global GP2 indices -> local indices using haze-0 palette,

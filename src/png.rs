@@ -122,8 +122,13 @@ pub fn export_texture_png(
     let w = tx.width as usize;
     let h = tx.height as usize;
     let qps = tx.quarter_palette_size as usize;
-    let transparent = tx.transparent != 0;
     let pal_off = texture_palette_offset(parsed, tex_idx);
+
+    // Only enable PNG transparency if local index 0 maps to GP2 index 0
+    // (the traditional transparent color). Some textures have non-zero
+    // transparent field but use index 0 for visible content.
+    let transparent = tx.transparent != 0
+        && (qps == 0 || parsed.palette_data[pal_off] == 0);
 
     let img = extract_texture_image(parsed, tex_idx);
     let rgb_pal = if qps == 0 {
