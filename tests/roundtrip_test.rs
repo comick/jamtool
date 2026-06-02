@@ -35,7 +35,8 @@ fn run_decode(infile: &Path, outdir: &Path) {
             continue;
         }
 
-        let rgb_pal = png::build_palette(&parsed.palette_data, 0, 0, qps, &global_pal);
+        let pal_off = jamtool::texture_palette_offset(&parsed, t);
+        let rgb_pal = png::build_palette(&parsed.palette_data, pal_off, 0, qps, &global_pal);
 
         let out = outdir.join(format!("{}_{}.png", stem, t));
         let img = jamtool::extract_texture_image(&parsed, t);
@@ -201,4 +202,9 @@ fn test_roundtrip_ferrari() {
 #[test]
 fn test_roundtrip_hormag() {
     run_roundtrip_test("HORMAG");
+}
+
+#[test]
+fn test_roundtrip_parf() {
+    run_roundtrip_test("PARF");
 }

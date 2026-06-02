@@ -231,6 +231,28 @@ pub fn import_from_zip_files_wasm(meta_str: &str, stem: &str, pngs_js: JsValue) 
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Convert local indices (from PNG pixel data) -> global GP2 indices
+    // using the meta's palette, then encode() will repalettize internally.
+    let texture_images_global: Vec<Vec<u8>> = meta
+        .textures
+        .iter()
+        .zip(texture_images_global.iter())
+        .map(|(mt, img_local)| {
+            let qps = mt.tx.quarter_palette_size as usize;
+            let pal = &mt.palette;
+            let mut img_global = Vec::with_capacity(img_local.len());
+            for &local_idx in img_local {
+                let global_idx = if (local_idx as usize) < qps && qps <= pal.len() {
+                    pal[local_idx as usize]
+                } else {
+                    0
+                };
+                img_global.push(global_idx);
+            }
+            img_global
+        })
+        .collect();
+
     // encode() repalettizes internally: global GP2 indices -> local indices
     let (meta, encoded_jam) = crate::encode(&meta, &texture_images_global)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
