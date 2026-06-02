@@ -47,6 +47,9 @@
             background: #f8f8f8;
             border: 1px solid #ccc;
             border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
 
         .toolbar-item:hover {
@@ -258,6 +261,87 @@
             text-decoration: underline;
         }
 
+        /* Empty state placeholder (shown before a JAM is loaded) */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            padding: 48px 40px;
+            color: #3a3a3a;
+            text-align: center;
+            user-select: none;
+        }
+
+        .empty-state.hidden {
+            display: none;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            line-height: 1;
+            opacity: 0.7;
+        }
+
+        .empty-state-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin: 0;
+            letter-spacing: -0.2px;
+        }
+
+        .empty-state-subtitle {
+            font-size: 13px;
+            color: #555;
+            margin: -12px 0 0 0;
+        }
+
+        .empty-state-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 8px;
+        }
+
+        .empty-state-action {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #2a2a2a;
+            cursor: default;
+        }
+
+        .empty-state-action-icon {
+            font-size: 15px;
+            width: 22px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .empty-state-action-label {
+            font-weight: 600;
+        }
+
+        .empty-state-action-desc {
+            color: #555;
+        }
+
+        .empty-state-action kbd {
+            display: inline-block;
+            padding: 0 5px;
+            font-size: 11px;
+            font-family: inherit;
+            background: rgba(0,0,0,0.1);
+            border: 1px solid rgba(0,0,0,0.15);
+            border-radius: 3px;
+            color: #3a3a3a;
+            line-height: 1.4;
+        }
+
         /* Paste overlay */
         #paste-overlay {
             z-index: 10;
@@ -304,13 +388,13 @@
 <div class="toolbar">
     <div class="toolbar-group">
         <span class="toolbar-label">File:</span>
-        <div class="toolbar-item" id="menu-load">Load JAM</div>
-        <div class="toolbar-item disabled" id="menu-save">Save JAM</div>
+        <div class="toolbar-item" id="menu-load">📂 Load JAM</div>
+        <div class="toolbar-item disabled" id="menu-save">💾 Save JAM</div>
     </div>
     <div class="toolbar-group">
         <span class="toolbar-label">Tools:</span>
-        <div class="toolbar-item" id="menu-load-zip">Import</div>
-        <div class="toolbar-item disabled" id="menu-export-zip">Export</div>
+        <div class="toolbar-item" id="menu-load-zip">📥 Import</div>
+        <div class="toolbar-item disabled" id="menu-export-zip">📤 Export</div>
     </div>
     <div class="toolbar-group">
         <span class="toolbar-label">Zoom:</span>
@@ -333,7 +417,7 @@
         </div>
     </div>
     <div class="content-area">
-        <canvas height="256" id="editor-canvas" width="256"></canvas>
+        <canvas height="256" id="editor-canvas" width="256" style="display:none;"></canvas>
         <div id="paste-overlay"
              style="display:none; position:absolute; pointer-events:none; image-rendering:pixelated; opacity:0.2;"></div>
         <div id="paste-clip"
@@ -342,6 +426,34 @@
         <div class="handle" data-corner="tr"></div>
         <div class="handle" data-corner="bl"></div>
         <div class="handle" data-corner="br"></div>
+
+        <!-- Empty state placeholder -->
+        <div class="empty-state" id="empty-state">
+            <h2 class="empty-state-title">jamtool</h2>
+            <p class="empty-state-subtitle">GP2 JAM texture editor and Inspector</p>
+            <div class="empty-state-actions">
+                <div class="empty-state-action">
+                    <span class="empty-state-action-icon">📂</span>
+                    <span class="empty-state-action-label">Load a JAM file</span>
+                    <span class="empty-state-action-desc">— open a JAM file to edit its textures</span>
+                </div>
+                <div class="empty-state-action">
+                    <span class="empty-state-action-icon">📥</span>
+                    <span class="empty-state-action-label">Import a ZIP</span>
+                    <span class="empty-state-action-desc">— restore a previous export from this tool</span>
+                </div>
+                <div class="empty-state-action">
+                    <span class="empty-state-action-icon">🎨</span>
+                    <span class="empty-state-action-label">Paint &amp; paste</span>
+                    <span class="empty-state-action-desc">— draw pixel-by-pixel, or <kbd>Ctrl+V</kbd> an image</span>
+                </div>
+                <div class="empty-state-action">
+                    <span class="empty-state-action-icon">💾</span>
+                    <span class="empty-state-action-label">Save &amp; export</span>
+                    <span class="empty-state-action-desc">— save as ready-to-use JAM or export as ZIP</span>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -610,6 +722,8 @@
             selectTexture(0);
             updateColorPreview();
             updateToolbarState();
+            // Hide empty state on first load
+            document.getElementById('empty-state').classList.add('hidden');
             status.innerText = `JAM loaded: ${file.name}`;
         } catch (err) {
             alert("Error decoding JAM: " + err);
@@ -747,6 +861,7 @@
             <div class="detail-row"><span class="detail-label">Unk18:</span><span class="detail-value" style="font-size: 10px;">[${tex.unk18.join(',')}]</span></div>
         `;
 
+        canvas.style.display = 'block';
         canvas.width = tex.width;
         canvas.height = tex.height;
 
@@ -1033,6 +1148,8 @@
             selectTexture(0);
             updateColorPreview();
             updateToolbarState();
+            // Hide empty state on import
+            document.getElementById('empty-state').classList.add('hidden');
             status.innerText = `ZIP loaded: ${file.name}`;
         } catch (err) {
             alert("Error loading ZIP: " + err);
