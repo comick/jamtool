@@ -542,6 +542,7 @@
                 pasteState.dragStartY = e.clientY;
                 pasteState.dragOffsetX = pasteState.offsetX;
                 pasteState.dragOffsetY = pasteState.offsetY;
+                updateCursors();
                 return;
             }
             isDrawing = true;
@@ -554,7 +555,8 @@
         canvas.addEventListener('mouseleave', () => {
             status.innerText = jamParsed ? `JAM loaded.` : `Ready.`;
         });
-        canvas.addEventListener('wheel', (e) => {
+        const contentArea = document.querySelector('.content-area');
+        contentArea.addEventListener('wheel', (e) => {
             if (!e.ctrlKey) return;
             e.preventDefault();
             if (!jamParsed) return;
@@ -659,6 +661,7 @@
             if (pasteState) {
                 pasteState.isDragging = false;
                 pasteState.resizing = null;
+                updateCursors();
             }
             // Refresh thumbnail after a drawing stroke ends
             if (jamParsed) updateThumbnail(selectedTextureIdx);
@@ -673,6 +676,18 @@
 
         window.addEventListener('resize', () => {
             updatePasteOverlayDOM();
+        });
+
+        // Paste overlay drag — make the overlay itself draggable by its full extent
+        pasteOverlay.addEventListener('mousedown', (e) => {
+            if (!pasteState) return;
+            pasteState.isDragging = true;
+            pasteState.dragStartX = e.clientX;
+            pasteState.dragStartY = e.clientY;
+            pasteState.dragOffsetX = pasteState.offsetX;
+            pasteState.dragOffsetY = pasteState.offsetY;
+            updateCursors();
+            e.stopPropagation();
         });
 
         // Paste overlay handle drag events
@@ -839,6 +854,7 @@
     function selectTexture(idx) {
         // Clear any active paste overlay when switching textures
         pasteState = null;
+        updateCursors();
         selectedTextureIdx = idx;
         document.querySelectorAll('.texture-item').forEach((item, i) => {
             item.classList.toggle('selected', i === idx);
@@ -933,6 +949,7 @@
     function updatePasteOverlayDOM() {
         if (!pasteState || !pasteState.imageData || !pasteState.dataURL) {
             pasteOverlay.style.display = 'none';
+            pasteOverlay.style.pointerEvents = 'none';
             pasteClip.style.display = 'none';
             for (const h of Object.values(pasteHandles)) h.style.display = 'none';
             return;
@@ -1158,6 +1175,21 @@
         }
     }
 
+    function updateCursors() {
+        if (!pasteState) {
+            canvas.style.cursor = 'crosshair';
+            pasteOverlay.style.cursor = '';
+            return;
+        }
+        if (pasteState.isDragging) {
+            canvas.style.cursor = 'grabbing';
+            pasteOverlay.style.cursor = 'grabbing';
+        } else {
+            canvas.style.cursor = 'move';
+            pasteOverlay.style.cursor = 'move';
+        }
+    }
+
     async function handlePaste(e) {
         if (!jamParsed || !globalPalette) return;
 
@@ -1238,6 +1270,8 @@
             resizeStartOffsetY: 0,
             dataURL: pasteCanvas.toDataURL(),
         };
+        pasteOverlay.style.pointerEvents = 'auto';
+        updateCursors();
 
         renderEditor();
         status.innerText = `Image pasted. Drag to position, press Enter to commit.`;
@@ -1290,6 +1324,7 @@
 
         // Clean up paste state
         pasteState = null;
+        updateCursors();
 
         renderEditor();
         updateThumbnail(selectedTextureIdx);
