@@ -38,22 +38,23 @@ This will generate the WASM and JavaScript glue code in the `pkg/` directory.
 
 ### CLI
 
-#### Exporting to PNG
+#### Decode (extract JAM to PNG + metadata)
 
 ```bash
 ./target/release/jamtool <INPUT.JAM> <OUTPUT_DIR>
 ```
 
-This extracts all textures into the specified directory as PNGs and creates a `.jammeta.txt` file.
-Output also includes images using the *haze* palettes, though they are not explicitly included in the JAM file and are ignored when encoding back to JAM.
+Extracts all textures into `<OUTPUT_DIR>` as indexed PNGs (one per texture, using GP2 palette colors) along with a `<stem>.json` metadata file. The metadata file stores the original texture headers and palette data needed for re-encoding.
 
-#### Importing from PNG
+#### Encode (import from PNG + metadata)
 
 ```bash
-./target/release/jamtool --encode <INPUT_DIR> <OUTPUT.JAM>
+./target/release/jamtool --encode <META_JSON> <OUTPUT.JAM>
 ```
 
-This takes the PNGs and the `.jammeta.txt` file from the directory and encodes them back into a single JAM file.
+Reads the metadata JSON and the referenced PNG files from the same directory, then encodes them back into a single encrypted `.JAM` file.
+
+The PNG pixel data must use **local palette indices** (0..quarter_palette_size-1) matching the embedded palette in the metadata. The tool converts these to global GP2 indices and repalettizes internally.
 
 ### Web Editor Features
 

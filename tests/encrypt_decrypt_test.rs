@@ -1,5 +1,3 @@
-use jamtool;
-
 #[test]
 fn test_jam_encryption_idempotency() {
     let original = b"Hello GP2 JAM File!".to_vec();
